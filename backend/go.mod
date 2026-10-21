@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/difyz9/edge-tts-go v0.0.3
-	github.com/fsnotify/fsnotify v1.8.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gin-contrib/cors v1.4.0
 	github.com/gin-gonic/gin v1.8.1
 	github.com/glebarez/sqlite v1.11.0
