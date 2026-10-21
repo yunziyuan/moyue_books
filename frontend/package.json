@@ -20,7 +20,7 @@
     "pdfjs-dist": "^3.11.174",
     "signal-exit": "^4.1.0",
     "vue": "^3.4.21",
-    "vue-router": "^4.3.0"
+    "vue-router": "^5.4.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",
