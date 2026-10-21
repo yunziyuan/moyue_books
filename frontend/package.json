@@ -19,7 +19,7 @@
     "once": "^1.4.0",
     "pdfjs-dist": "^3.11.174",
     "signal-exit": "^4.1.0",
-    "vue": "^3.4.21",
+    "vue": "^3.5.44",
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
