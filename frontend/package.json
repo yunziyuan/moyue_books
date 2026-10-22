@@ -17,7 +17,7 @@
     "element-plus": "^2.6.1",
     "foliate-js": "^1.0.1",
     "once": "^1.4.0",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^6.4.299",
     "signal-exit": "^4.1.0",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
