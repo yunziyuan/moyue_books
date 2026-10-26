@@ -519,7 +519,7 @@ const bookStatus = (book) => {
   return { text: '未读', cls: 'new' }
 }
 
-const isReadable = (book) => ['epub', 'kepub', 'pdf', 'azw3', 'mobi'].includes(book.file_type)
+const isReadable = (book) => ['epub', 'kepub', 'pdf', 'azw3', 'mobi', 'md', 'txt'].includes(book.file_type)
 
 const formatAuthors = (authors) => {
   if (!authors) return '未知作者'

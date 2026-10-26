@@ -106,7 +106,7 @@
 
           <div class="detail-actions">
             <el-button
-              v-if="book.file_type === 'epub' || book.file_type === 'kepub' || book.file_type === 'pdf' || book.file_type === 'azw3' || book.file_type === 'mobi'"
+              v-if="book.file_type === 'epub' || book.file_type === 'kepub' || book.file_type === 'pdf' || book.file_type === 'azw3' || book.file_type === 'mobi' || book.file_type === 'md' || book.file_type === 'txt'"
               type="primary"
               size="large"
               @click="goRead"

@@ -162,7 +162,7 @@
           <BookCard :book="book" :index="index" show-meta @click="goToDetail(book.id)">
             <template #actions>
               <el-button
-                v-if="book.file_type === 'epub' || book.file_type === 'kepub' || book.file_type === 'pdf' || book.file_type === 'azw3' || book.file_type === 'mobi'"
+                v-if="book.file_type === 'epub' || book.file_type === 'kepub' || book.file_type === 'pdf' || book.file_type === 'azw3' || book.file_type === 'mobi' || book.file_type === 'md' || book.file_type === 'txt'"
                 type="primary"
                 size="small"
                 circle
@@ -264,7 +264,7 @@
           <template #default="{ row }">
             <div class="op-actions">
               <el-button
-                v-if="row.file_type === 'epub' || row.file_type === 'kepub' || row.file_type === 'pdf' || row.file_type === 'azw3' || row.file_type === 'mobi'"
+                v-if="row.file_type === 'epub' || row.file_type === 'kepub' || row.file_type === 'pdf' || row.file_type === 'azw3' || row.file_type === 'mobi' || row.file_type === 'md' || row.file_type === 'txt'"
                 type="primary"
                 size="small"
                 class="action-btn"
