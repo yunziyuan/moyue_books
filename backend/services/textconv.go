@@ -69,8 +69,8 @@ func ConvertTextToEPUB(srcPath, title, fileType, outDir string) (string, error) 
 	switch strings.ToLower(fileType) {
 	case "md":
 		chapters = splitMarkdownChapters(content)
-	default: // txt
-		chapters = []mdChapter{{Title: "", Body: content}}
+	default: // txt：按章节标题（第N章/第一章/Chapter N/楔子…）拆分为多章节
+		chapters = splitTextChapters(content)
 	}
 	// 将超大章节按段落切分为多个子章节，避免单章体积过大（尤其大体积 txt）
 	// 导致阅读器一次性加载整个 DOM 而解析失败或卡死。
@@ -86,10 +86,15 @@ func ConvertTextToEPUB(srcPath, title, fileType, outDir string) (string, error) 
 		}
 	}
 
-	// 书名：未显式指定时取首个一级标题，再回退文件名
+	// 书名：未显式指定时，Markdown 取首个一级标题（通常为书名）；
+	// 纯文本（txt）的“章节标题”并非书名，回退到文件名，避免把首章名当成书名。
 	if title == "" {
-		if len(chapters) > 0 && chapters[0].Title != "" {
-			title = chapters[0].Title
+		if strings.ToLower(fileType) == "md" {
+			if len(chapters) > 0 && chapters[0].Title != "" {
+				title = chapters[0].Title
+			} else {
+				title = strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath))
+			}
 		} else {
 			title = strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath))
 		}
@@ -185,6 +190,65 @@ func splitMarkdownChapters(md string) []mdChapter {
 	return chapters
 }
 
+// splitTextChapters 按章节标题行将纯文本(.txt)拆分为多章节，便于阅读器目录导航。
+// 识别「第N章/第一章/Chapter N/楔子…」等标题（见 textChapterRe），标题行本身作为章节标题；
+// 标题前的正文作为“前言”章节（首章空标题会回退为书名）。仅当标题行较短（≤60 字）时才判定为
+// 章节标题，降低正文中偶现“第一章”之类字样的误判概率。
+func splitTextChapters(content string) []mdChapter {
+	lines := strings.Split(content, "\n")
+	var chapters []mdChapter
+	var cur *mdChapter
+	flush := func() {
+		if cur != nil {
+			chapters = append(chapters, *cur)
+			cur = nil
+		}
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if cur != nil {
+				cur.Body += line + "\n"
+			}
+			continue
+		}
+		if utf8.RuneCountInString(trimmed) <= 60 && textChapterRe.MatchString(trimmed) {
+			flush()
+			cur = &mdChapter{Title: cleanChapterTitle(trimmed), Body: ""}
+			continue
+		}
+		if cur == nil {
+			cur = &mdChapter{Title: "", Body: ""}
+		}
+		cur.Body += line + "\n"
+	}
+	flush()
+	if len(chapters) == 0 {
+		chapters = append(chapters, mdChapter{Title: "", Body: content})
+	}
+	return chapters
+}
+
+// cleanChapterTitle 去掉章节标题外层的装饰符号（书名号、方头括号、圆括号、星号等），保留核心文本。
+func cleanChapterTitle(t string) string {
+	t = strings.TrimSpace(t)
+	t = strings.Trim(t, "★☆*·• ")
+	for {
+		changed := false
+		for _, p := range [][2]string{{"《", "》"}, {"【", "】"}, {"[", "]"}, {"（", "）"}} {
+			if strings.HasPrefix(t, p[0]) && strings.HasSuffix(t, p[1]) && utf8.RuneCountInString(t) > 2 {
+				t = strings.TrimSpace(t[len(p[0]) : len(t)-len(p[1])])
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	t = strings.Trim(t, "《【[（》】]）★☆*·• ")
+	return t
+}
+
 // boundChapters 将超过单章大小上限的章节按段落（空行）切分为多个子章节。
 // 这样阅读器（foliate 等）可逐章懒加载，避免单章体积过大而无法打开/卡死；
 // 同时保留原章节标题：首段沿用原标题（txt 首章为空则回退书名），后续子段追加序号。
@@ -192,10 +256,10 @@ func boundChapters(chapters []mdChapter) []mdChapter {
 	const maxBytes = 200 * 1024 // 每章约 200KB 原始文本
 	var out []mdChapter
 	for _, ch := range chapters {
-		if len(ch.Body) <= maxBytes {
-			out = append(out, ch)
-			continue
-		}
+		// if len(ch.Body) <= maxBytes {
+		// 	out = append(out, ch)
+		// 	continue
+		// }
 		paras := strings.Split(ch.Body, "\n")
 		var buf []string
 		cur := 0
@@ -206,6 +270,7 @@ func boundChapters(chapters []mdChapter) []mdChapter {
 			}
 			title := ch.Title
 			if sub > 1 {
+
 				if ch.Title != "" {
 					title = fmt.Sprintf("%s（%d）", ch.Title, sub)
 				} else {
@@ -237,6 +302,12 @@ var (
 	hrRe      = regexp.MustCompile(`^(\-{3,}|\*{3,}|_{3,})$`)
 	ulRe      = regexp.MustCompile(`^[-*+]\s+`)
 	olRe      = regexp.MustCompile(`^\d+\.\s+`)
+	// textChapterRe 匹配中文/英文小说的章节标题行（覆盖多种冗余写法）：
+	//   第1章 / 第01章 / 第 1 章 / 第一章 / 第〇章 / 第二百章 / 第1卷 / 第3回 …
+	//   Chapter 1 / CHAPTER 1 / Ch.1
+	//   楔子 / 序章 / 序 / 引子 / 正文 / 后记 / 尾声 / 番外 / 外传
+	// 允许标题被 《》【】[]（） 等装饰符号包裹（由 cleanChapterTitle 去除）。
+	textChapterRe = regexp.MustCompile(`^\s*(?:[《【[（]*\s*(?:第\s*[0-9零一二三四五六七八九十百千〇两壹贰叁肆伍陆柒捌玖]+\s*[章卷回节部篇集]|[Cc]hapter\s*[0-9]+|[Cc]h\.\s*[0-9]+|楔子|序章|序|引子|正文|后记|尾声|番外|外传)\s*[]》】）]*)`)
 )
 
 // convertMarkdownLines 将 Markdown 正文（不含被拆分出去的一级标题行）转换为 HTML 片段。
