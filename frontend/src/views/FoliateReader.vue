@@ -800,7 +800,11 @@ async function openBook() {
     // foliate 的格式探测会读取 file.name（如 name.endsWith('.cbz')），
     // 而 fetch 得到的 Blob 没有 name，会抛 "Cannot read properties of undefined (reading 'endsWith')"。
     // 包装成带文件名的 File 即可正常执行格式探测。
-    const filename = (bookInfo.value.file_path || 'book').split(/[\\/]/).pop()
+    const ft = (bookInfo.value?.file_type || props.book?.file_type || '').toLowerCase()
+    const rawName = (bookInfo.value?.file_path || 'book').split(/[\\/]/).pop()
+    // md/txt 图书经后端按需转为 EPUB 提供（见后端 ServeBookFile），
+    // 必须以 .epub 命名供 foliate 正确探测格式
+    const filename = ft === 'md' || ft === 'txt' ? `${props.id}.epub` : rawName
     const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' })
     // 用隐藏的 foliate-view 仅做"书籍解析"：拿到 sections/toc 元数据
     const v = hiddenFoliate.value

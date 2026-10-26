@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,11 +11,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"my-books/backend/config"
 	"my-books/backend/middleware"
 	"my-books/backend/models"
+	"my-books/backend/services"
 	"my-books/backend/utils"
 
 	"github.com/gin-gonic/gin"
@@ -373,7 +377,22 @@ func ServeBookFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
-	fp := utils.ResolvePath(book.FilePath)
+	// 文本类（md/txt）媒体库图书：按需转成缓存 EPUB 再提供，使 EPUB 阅读器可正常解析；
+	// 不删除/改写原始文件，也不改动 book.FilePath，保全“源文件缺失/变更”检测。
+	filePath := utils.ResolvePath(book.FilePath)
+	if book.FileType == "md" || book.FileType == "txt" {
+		epubPath, convErr := ensureTextEpub(&book)
+		if convErr != nil {
+			if os.IsNotExist(convErr) {
+				c.JSON(http.StatusGone, gin.H{"error": "源文件已不存在"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "文本转 EPUB 失败"})
+			}
+			return
+		}
+		filePath = epubPath
+	}
+	fp := filePath
 	info, err := os.Stat(fp)
 	if err != nil {
 		c.JSON(http.StatusGone, gin.H{"error": "源文件已不存在"})
@@ -387,6 +406,68 @@ func ServeBookFile(c *gin.Context) {
 	c.Header("ETag", fmt.Sprintf(`"%x-%x"`, info.ModTime().UnixNano(), info.Size()))
 	c.Header("Cache-Control", "private, no-cache")
 	c.File(fp)
+}
+
+// textEpubLocks 单飞锁：避免同一本文本书并发重复转换（key=book.Hash 或源路径哈希）。
+var textEpubLocks sync.Map
+
+func getTextEpubLock(key string) *sync.Mutex {
+	v, _ := textEpubLocks.LoadOrStore(key, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// ensureTextEpub 对于 Markdown/TXT 图书，按需将其转换为缓存的 EPUB 并返回该 EPUB 路径；
+// 其它格式直接返回解析后的原始路径。转换结果按源文件修改时间失效，落于 UploadDir/cache 下，
+// 不删除媒体库原始文件，也不改变 book.FilePath，从而保全“源文件缺失/变更”检测。
+//
+// 设计取舍（方案 A）：媒体库扫描刻意“不迁移源文件”（见 library.go buildLibraryPending），
+// 因此这里采用“阅读时按需转换 + 缓存”，而非在入库时转换，避免破坏去重/缺失/变更检测语义。
+func ensureTextEpub(book *models.Book) (string, error) {
+	if book.FileType != "md" && book.FileType != "txt" {
+		return utils.ResolvePath(book.FilePath), nil
+	}
+	src := utils.ResolvePath(book.FilePath)
+	if _, err := os.Stat(src); err != nil {
+		return "", err // 源文件缺失
+	}
+
+	cacheDir := filepath.Join(config.UploadDir(), "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", err
+	}
+	key := strconv.FormatUint(uint64(book.ID), 10)
+	if book.ID == 0 {
+		h := sha256.Sum256([]byte(src))
+		key = hex.EncodeToString(h[:])
+	}
+	epubPath := filepath.Join(cacheDir, key+".epub")
+
+	lock := getTextEpubLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// 命中且未过期：源文件自上次转换后未被修改
+	if srcInfo, err := os.Stat(src); err == nil {
+		if epubInfo, err := os.Stat(epubPath); err == nil {
+			if !epubInfo.ModTime().Before(srcInfo.ModTime()) {
+				return epubPath, nil
+			}
+		}
+	}
+
+	title := book.Title
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
+	}
+	generated, err := services.ConvertTextToEPUB(src, title, book.FileType, config.UploadDir())
+	if err != nil {
+		return "", err
+	}
+	// 落入稳定的缓存名（覆盖可能存在的旧缓存），避免每次生成新的 uuid 文件造成泄漏
+	if err := os.Rename(generated, epubPath); err != nil {
+		return "", err
+	}
+	return epubPath, nil
 }
 
 // GetStats 获取统计信息

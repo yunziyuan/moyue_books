@@ -82,7 +82,16 @@ func GetBookTOC(c *gin.Context) {
 // 因此必须整体 recover 兜底（PDF 解析库对损坏文件可能 panic）。
 func ParseAndStoreTOC(book models.Book) {
 	defer func() { _ = recover() }()
-	items, _ := services.ExtractTOC(utils.ResolvePath(book.FilePath), book.FileType)
+	fileType := book.FileType
+	filePath := utils.ResolvePath(book.FilePath)
+	// Markdown / TXT：转换为缓存 EPUB 后提取目录，使后端目录与阅读器（foliate）章节一致
+	if fileType == "md" || fileType == "txt" {
+		if epubPath, e := ensureTextEpub(&book); e == nil {
+			filePath = epubPath
+			fileType = "epub"
+		}
+	}
+	items, _ := services.ExtractTOC(filePath, fileType)
 	if items == nil {
 		items = []services.TOCItem{}
 	}

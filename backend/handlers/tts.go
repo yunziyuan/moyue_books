@@ -3,6 +3,7 @@ package handlers
 import (
 	"html"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -91,13 +92,28 @@ func GetBookChapterText(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "book not found"})
 		return
 	}
-	if book.FileType != "epub" && book.FileType != "kepub" && book.FileType != "azw3" && book.FileType != "mobi" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only epub/azw3/mobi chapter text is supported"})
-		return
+	// 文本类（md/txt）媒体库图书：按需转成缓存 EPUB 后按 EPUB 提取章节文本（支持 AI 听书）
+	var reader bookReader
+	var openErr error
+	if book.FileType == "md" || book.FileType == "txt" {
+		epubPath, e := ensureTextEpub(&book)
+		if e != nil {
+			if os.IsNotExist(e) {
+				c.JSON(http.StatusGone, gin.H{"error": "源文件已不存在"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "文本转 EPUB 失败"})
+			}
+			return
+		}
+		reader, openErr = openBookReader(epubPath, "epub")
+	} else {
+		if book.FileType != "epub" && book.FileType != "kepub" && book.FileType != "azw3" && book.FileType != "mobi" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "only epub/azw3/mobi chapter text is supported"})
+			return
+		}
+		reader, openErr = openBookReader(utils.ResolvePath(book.FilePath), book.FileType)
 	}
-
-	reader, err := openBookReader(utils.ResolvePath(book.FilePath), book.FileType)
-	if err != nil {
+	if openErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open book"})
 		return
 	}
