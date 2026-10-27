@@ -576,6 +576,13 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 				break
 			}
 			text := htmlToText(content)
+			// 清洗：结构化源（epub/kepub/azw3）做行级去噪；mobi 解析质量差，
+			// 走纯文本过滤器（FilterRawBookText）容错更强，适合标签残缺场景。
+			if ft == "mobi" {
+				text = FilterRawBookText(text, DefaultAudioBookCleanConfig)
+			} else {
+				text = CleanBookText(text, DefaultAudioBookCleanConfig)
+			}
 			if t := strings.TrimSpace(text); t != "" {
 				title := titleBy[chapter]
 				if title == "" {
@@ -637,7 +644,7 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 			appendChunks(title, bufStart, splitTextChunks(text, maxChars))
 		}
 		for pg := 1; pg <= np && len(segs) < audiobookMaxSegments; pg++ {
-			t := pages[pg]
+			t := CleanBookText(pages[pg], DefaultAudioBookCleanConfig)
 			if t == "" {
 				continue
 			}
@@ -661,6 +668,7 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 		if text == "" {
 			return nil, fmt.Errorf("文件无文本内容")
 		}
+		text = CleanBookText(text, DefaultAudioBookCleanConfig)
 		if ft == "md" {
 			// md 按标题行切分为节，保留结构感
 			var parts []string
@@ -689,7 +697,7 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 				if isTOCSection(title, part) {
 					continue
 				}
-				appendChunks(title, i, splitTextChunks(part, maxChars))
+				appendChunks(title, i, splitTextChunks(CleanBookText(part, DefaultAudioBookCleanConfig), maxChars))
 				if len(segs) >= audiobookMaxSegments {
 					break
 				}
