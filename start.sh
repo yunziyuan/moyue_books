@@ -18,7 +18,21 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo ""
 echo "[1/3] 正在编译并启动后端服务 (localhost:18080)..."
 cd "$PROJECT_DIR/backend"
-CGO_ENABLED=0 go build -o moyue-server .
+CGO_ENABLED=0 go build -tags nocgo -o moyue-server .
+
+# go-fitz(nocgo/purego) 运行期需 libmupdf 共享库且版本须匹配：
+# 给本机二进制注入 LC_RPATH（受限进程也会经 @rpath 找到库），并设 FZ_VERSION。
+if [ "$(uname)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  MUPDF_PREFIX="$(brew --prefix mupdf 2>/dev/null || true)"
+  if [ -n "$MUPDF_PREFIX" ] && [ -f "$MUPDF_PREFIX/lib/libmupdf.dylib" ]; then
+    install_name_tool -add_rpath "$MUPDF_PREFIX/lib" moyue-server 2>/dev/null || true
+    export DYLD_LIBRARY_PATH="$MUPDF_PREFIX/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    VER="$(readlink -f "$MUPDF_PREFIX" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    [ -n "$VER" ] && export FZ_VERSION="${FZ_VERSION:-$VER}"
+  fi
+fi
+[ -z "$FZ_VERSION" ] && export FZ_VERSION=1.28.5
+
 ./moyue-server &
 BACKEND_PID=$!
 echo "      后端 PID: $BACKEND_PID"

@@ -4,7 +4,7 @@
 # 应用唯一标识：与 fpk 目录名一致，安装后不可修改
 appname               = moyue
 # 版本号（三段式）：升级时递增，须大于已安装版本
-version               = 1.0.2
+version               = 1.0.3
 # 应用中心显示的名称
 display_name          = 墨阅书屋
 # 应用描述（支持 HTML 富文本）

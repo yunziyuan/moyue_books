@@ -105,10 +105,10 @@ mkdir -p "$PACK_DIR/bin"
 # 注意：赋值前缀必须是字面量，不能由变量展开得到，因此 armv7 单独分支
 if [ -n "$GOARM" ]; then
   (cd "$ROOT/backend" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOARM="$GOARM" \
-    go build -trimpath -ldflags "-s -w" -o "$PACK_DIR/bin/moyue" .)
+    go build -tags nocgo -trimpath -ldflags "-s -w" -o "$PACK_DIR/bin/moyue" .)
 else
   (cd "$ROOT/backend" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" \
-    go build -trimpath -ldflags "-s -w" -o "$PACK_DIR/bin/moyue" .)
+    go build -tags nocgo -trimpath -ldflags "-s -w" -o "$PACK_DIR/bin/moyue" .)
 fi
 ok "二进制: fnos/moyue/app/bin/moyue"
 

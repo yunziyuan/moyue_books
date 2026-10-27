@@ -128,6 +128,10 @@ func TestOpenAZW3(t *testing.T) {
 	}
 	defer r.Close()
 
+	// 合成样例为 MOBI7（version=6），不应判定为 KF8
+	if r.IsKF8() {
+		t.Errorf("synthetic MOBI7 wrongly reported as KF8")
+	}
 	if r.Title != "Test Book" {
 		t.Errorf("title = %q, want %q", r.Title, "Test Book")
 	}

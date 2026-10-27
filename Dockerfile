@@ -27,15 +27,19 @@ RUN go mod download
 COPY backend/ ./
 # go:embed all:dist 需要 html/dist 在编译期存在
 COPY --from=frontend /dist ./html/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" -o /out/moyue-server .
+# mobi 文本提取走 go-fitz 的 nocgo（purego）实现：编译期仍免 CGO，
+# 运行期需随附 libmupdf 共享库（见运行镜像）。
+RUN CGO_ENABLED=0 GOOS=linux go build -tags nocgo -trimpath -ldflags "-s -w" -o /out/moyue-server .
 
 # ---------- 3. 运行镜像 ----------
 FROM alpine:3.20
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata mupdf \
   && addgroup -S moyue && adduser -S moyue -G moyue
 
 COPY --from=backend /out/moyue-server /app/moyue-server
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 ENV MB_DATA_DIR=/app/data \
     PORT=18080
@@ -46,4 +50,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:18080/ >/dev/null 2>&1 || exit 1
 
 USER moyue
-ENTRYPOINT ["/app/moyue-server"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

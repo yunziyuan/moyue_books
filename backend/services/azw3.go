@@ -32,6 +32,9 @@ type AZW3Reader struct {
 	images   map[string][]byte
 	tocItems []TOCItem
 
+	tagEntries  []string // MOBI7 标签表：索引 → 标签内容（不含 < >），用于还原文本中的 0x02/0x04 标记
+	charEntries []string // MOBI7 字符表：索引 → 字符/字符串，用于还原文本中的 0x01 标记（多字节字符）
+
 	compression int // 0=未压缩 1/2=PalmDOC 17480=Huffman
 	encoding    int // 文本编码（65001=UTF-8）
 	isKF8       bool
@@ -238,6 +241,29 @@ func (a *AZW3Reader) parseAZW3() error {
 		return errors.New("no text content")
 	}
 
+	// MOBI7 文本中的 HTML 标签以 tag table 索引形式存储（0x02/0x04 + 2 字节小端索引指向
+	// tag table 条目），多字节字符以 char table 索引形式存储（0x01 + 1 字节索引指向 char
+	// table 条目）；二者都必须还原，否则 < 丢失、标签破碎并连锁破坏周围文本（表现为中文
+	// 乱码 + HTML 属性残留）。KF8 的 rawML 已是展开后的完整 HTML，无需此步。
+	if !a.isKF8 {
+		if ct := hdrU32(hdr, 0xB0); ct != 0xFFFFFFFF {
+			if entries, _ := a.index.getIndexData(int(ct) + hdrIdx); len(entries) > 0 {
+				a.charEntries = make([]string, 0, len(entries))
+				for _, e := range entries {
+					a.charEntries = append(a.charEntries, string(e.text))
+				}
+			}
+		}
+		if tt := hdrU32(hdr, 0xB4); tt != 0xFFFFFFFF {
+			if entries, _ := a.index.getIndexData(int(tt) + hdrIdx); len(entries) > 0 {
+				a.tagEntries = make([]string, 0, len(entries))
+				for _, e := range entries {
+					a.tagEntries = append(a.tagEntries, string(e.text))
+				}
+			}
+		}
+	}
+
 	if a.isKF8 {
 		if err := a.buildKF8Content(records, raw, hdr); err != nil {
 			return err
@@ -349,6 +375,10 @@ func (a *AZW3Reader) buildKF8Content(records [][]byte, raw []byte, hdr []byte) e
 // buildMOBI7Content 经典 MOBI7：拼接正文并按 <mbp:pagebreak> 切分章节
 func (a *AZW3Reader) buildMOBI7Content(records [][]byte, raw []byte) {
 	text := decodeText(raw, a.encoding)
+	// 展开 tag table / char table 标记 → 完整 <tag> 与多字节字符
+	if len(a.tagEntries) > 0 || len(a.charEntries) > 0 {
+		text = expandMobiTags(text, a.tagEntries, a.charEntries)
+	}
 	text = strings.TrimSpace(text)
 	if idx := strings.Index(text, "<"); idx > 0 && idx < 4096 {
 		text = text[idx:]
@@ -384,6 +414,53 @@ func (a *AZW3Reader) buildMOBI7Content(records [][]byte, raw []byte) {
 			}
 		}
 	}
+}
+
+// expandMobiTags 把 MOBI7 文本中的标签/字符标记还原。
+//   - tag table 标记：0x02（+2 字节小端索引）开标签、0x04 闭标签、0x03/0x05 变体，
+//     索引指向 tag table 条目（标签内容，如 "div" 或 "p align=\"justify\""）。
+//   - char table 标记：0x01（+1 字节索引）多字节字符，索引指向 char table 条目。
+//
+// 这些控制字节是 ASCII 控制字符，不会出现在正常 UTF-8 中文文本中，因此可安全识别。
+func expandMobiTags(s string, tags, chars []string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	n := len(s)
+	for i < n {
+		c := s[i]
+		switch c {
+		case 0x01: // char table（多字节字符）
+			if i+2 <= n {
+				idx := int(s[i+1])
+				if idx >= 0 && idx < len(chars) {
+					b.WriteString(chars[idx])
+					i += 2
+					continue
+				}
+			}
+		case 0x02, 0x03, 0x04, 0x05: // tag table
+			if i+3 <= n {
+				idx := int(s[i+1]) | int(s[i+2])<<8
+				if idx >= 0 && idx < len(tags) {
+					tag := tags[idx]
+					if c == 0x04 { // 闭标签：仅取首个 token 作为标签名
+						if sp := strings.IndexAny(tag, " \t\r\n"); sp > 0 {
+							tag = tag[:sp]
+						}
+						b.WriteString("</" + tag + ">")
+					} else { // 0x02/0x03/0x05：开标签
+						b.WriteString("<" + tag + ">")
+					}
+					i += 3
+					continue
+				}
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String()
 }
 
 // buildTOC 生成目录：KF8 优先使用 NCX 索引（真实层级与标题），否则回退章节标题
@@ -468,6 +545,13 @@ func (a *AZW3Reader) GetContent(index int) ([]byte, error) {
 		return nil, fmt.Errorf("chapter %d out of range", index)
 	}
 	return []byte(a.chapters[index].html), nil
+}
+
+// IsKF8 是否为 KF8 格式（标签结构完整）。MOBI7（老格式）标签常以索引碎片形式存储，
+// 需额外还原，解析质量较差；KF8 的 rawML 已是展开后的完整 HTML。调用方可据此选择
+// 不同的文本清洗策略（结构化 CleanBookText vs 容错 FilterRawBookText）。
+func (a *AZW3Reader) IsKF8() bool {
+	return a.isKF8
 }
 
 // GetResource 返回资源（images/N）

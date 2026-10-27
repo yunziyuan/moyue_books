@@ -76,7 +76,7 @@ func extractBookCover(savePath, ext string, meta *services.BookMetadata) string 
 		}
 		return writeCover(coverData)
 	}
-	if ext == ".azw3" || ext == ".mobi" {
+	if ext == ".azw3" {
 		azw3, err := services.OpenAZW3(savePath)
 		if err != nil {
 			return ""
@@ -87,6 +87,13 @@ func extractBookCover(savePath, ext string, meta *services.BookMetadata) string 
 			return ""
 		}
 		return writeCover(coverData)
+	}
+	if ext == ".mobi" {
+		// nocgo 构建（go-fitz/MuPDF）下能正确提取老式 MOBI7 封面；回退构建则复用纯 Go 解析器。
+		if m, mErr := services.ExtractMobiMetadata(savePath); mErr == nil && len(m.CoverData) > 0 {
+			return writeCover(m.CoverData)
+		}
+		return ""
 	}
 	return ""
 }

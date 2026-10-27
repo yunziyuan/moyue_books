@@ -19,9 +19,18 @@ rm -rf "$PROJECT_DIR/backend/html/dist"
 cp -r "$PROJECT_DIR/frontend/dist" "$PROJECT_DIR/backend/html/dist"
 
 echo ""
-echo "[3/3] 编译后端单二进制 (go build)..."
+echo "[3/3] 编译后端单二进制 (go build，mobi 提取走 go-fitz/nocgo)..."
 cd "$PROJECT_DIR/backend"
-CGO_ENABLED=0 go build -o moyue-server .
+CGO_ENABLED=0 go build -tags nocgo -o moyue-server .
+
+# macOS 本机运行需 libmupdf：给二进制注入 LC_RPATH 以便 dyld 经 @rpath 找到库。
+if [ "$(uname)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  MUPDF_PREFIX="$(brew --prefix mupdf 2>/dev/null || true)"
+  if [ -n "$MUPDF_PREFIX" ] && [ -f "$MUPDF_PREFIX/lib/libmupdf.dylib" ]; then
+    install_name_tool -add_rpath "$MUPDF_PREFIX/lib" moyue-server 2>/dev/null || true
+    echo "  已注入 libmupdf rpath: $MUPDF_PREFIX/lib（运行期设 FZ_VERSION 匹配版本）"
+  fi
+fi
 
 echo ""
 echo "=========================================="

@@ -34,12 +34,14 @@ func ExtractMetadata(filePath string) (*BookMetadata, error) {
 	case ".epub", ".kepub":
 		// KEPUB 为 EPUB 变种（同为 ZIP 容器 + container.xml + OPF），解析方式完全一致
 		return extractEPUBMetadata(filePath)
-	case ".azw3", ".mobi":
+	case ".azw3":
 		meta, err := extractAZW3Metadata(filePath)
 		if err != nil {
 			return nil, err
 		}
 		return &meta, nil
+	case ".mobi":
+		return ExtractMobiMetadata(filePath)
 	case ".pdf":
 		return extractPDFMetadata(filePath)
 	default:

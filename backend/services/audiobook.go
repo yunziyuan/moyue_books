@@ -364,6 +364,26 @@ func htmlToText(content []byte) string {
 	return abHTMLEmptyRe.ReplaceAllString(text, "\n")
 }
 
+// htmlToTextKeepLines 与 htmlToText 相同地去标签/转义/压缩空白，但不把
+// 无句读结尾的连续短行合并成一行：用于「目录页检测」——目录清单（目录/第一章/第二章…）
+// 全是短行无标点，一旦被合并就失去 looksLikeTOCList 需要的"多行短行"特征，从而被误判为正文。
+func htmlToTextKeepLines(content []byte) string {
+	text := string(content)
+	text = abHTMLBlockRe.ReplaceAllString(text, "\n")
+	text = abHTMLTagRe.ReplaceAllString(text, "\n")
+	text = html.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\u00a0", " ")
+	text = abHTMLSpaceRe.ReplaceAllString(text, " ")
+	lines := make([]string, 0)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return abHTMLEmptyRe.ReplaceAllString(strings.Join(lines, "\n"), "\n")
+}
+
 // pdfPageText 顺序提取 PDF 各页纯文本（用于生成音频）
 func pdfPageText(filePath string) ([]string, error) {
 	f, r, err := pdf.Open(filePath)
@@ -496,12 +516,34 @@ func looksLikeTOCList(text string) bool {
 	return lines >= 4
 }
 
+// abReTOCMarker 匹配目录清单里常见的序号/标题标记（如"第 N 章"、"（一）"、
+// "观点一"、"第二章"、"1. 章"等），用于内联目录检测。
+var abReTOCMarker = regexp.MustCompile(`第\s*\d+\s*[章节回卷篇部分]|（\s*[一二三四五六七八九十百零]+\s*）|观点\s*[一二三四五六七八九十\d]+|章\s*\d+|节\s*\d+|\b\d+\s*[章节节]|chapter\s+\d+`)
+
+// looksLikeInlineTOC 兜底：单行内联目录（KF8/MOBI 常把多个章节链接挤在同一段，
+// 既非"多行短行"也非"目录标题"，只能靠"短文本 + 多个序号标记 + 无句号"判定）。
+// 目录几乎不含句号（。），而正文段落通常含句号，以此区分。
+func looksLikeInlineTOC(text string) bool {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) < 8 || len(runes) > 4000 {
+		return false
+	}
+	// 含句号更像正文段落；目录清单一般无句号
+	if strings.Contains(text, "。") {
+		return false
+	}
+	return len(abReTOCMarker.FindAllString(text, -1)) >= 4
+}
+
 // isTOCSection 判断一个章节/页面是否为目录（生成有声书时跳过，不朗读）。
 func isTOCSection(title, text string) bool {
 	if isTOCHeading(title) {
 		return true
 	}
-	return looksLikeTOCList(text)
+	if looksLikeTOCList(text) {
+		return true
+	}
+	return looksLikeInlineTOC(text)
 }
 
 // BuildAudiobookSegments 从图书提取全文并分段（生成音频前调用）。
@@ -544,7 +586,14 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 			Close()
 		}
 		switch ft {
-		case "azw3", "mobi":
+		case "mobi":
+			r, err := openMobiReader(filePath)
+			if err != nil {
+				return nil, err
+			}
+			defer r.Close()
+			reader = r
+		case "azw3":
 			az, err := OpenAZW3(filePath)
 			if err != nil {
 				return nil, err
@@ -575,25 +624,31 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 			if err != nil {
 				break
 			}
+			title := titleBy[chapter]
+			if title == "" {
+				title = fmt.Sprintf("第 %d 章", chapter+1)
+			}
+			// 目录页检测必须用「保留换行、未清洗」的文本：
+			// 1) htmlToText 会把无句读结尾的短行合并成一行，破坏 looksLikeTOCList
+			//    依赖的"多行短行"特征；
+			// 2) 随后的清洗（RemoveTocLine）会删除目录行，也会让目录清单行数不足。
+			// 二者都会让目录页被误当成正文朗读，因此这里在清洗前用保留换行的原文判定。
+			if isTOCSection(title, htmlToTextKeepLines(content)) {
+				log.Printf("audiobook: 跳过目录章节 第 %d 章（%s）", chapter+1, title)
+				chapter++
+				continue
+			}
 			text := htmlToText(content)
-			// 清洗：结构化源（epub/kepub/azw3）做行级去噪；mobi 解析质量差，
-			// 走纯文本过滤器（FilterRawBookText）容错更强，适合标签残缺场景。
-			if ft == "mobi" {
+			// 清洗策略按实际解析质量选择，而非文件后缀：OpenAZW3 同时服务 azw3/mobi，
+			// 而不少 .mobi 实为 KF8（标签完整）。KF8 走结构化清洗 CleanBookText，
+			// 保留英文专有名词与字母；MOBI7（标签残缺）走容错更强的 FilterRawBookText，
+			// 剔除残留标签碎片与乱码字节，避免被 TTS 当正文朗读。
+			if azw, ok := reader.(*AZW3Reader); ok && !azw.IsKF8() {
 				text = FilterRawBookText(text, DefaultAudioBookCleanConfig)
 			} else {
 				text = CleanBookText(text, DefaultAudioBookCleanConfig)
 			}
 			if t := strings.TrimSpace(text); t != "" {
-				title := titleBy[chapter]
-				if title == "" {
-					title = fmt.Sprintf("第 %d 章", chapter+1)
-				}
-				// 跳过目录页/目录章节（无正文价值），不生成语音
-				if isTOCSection(title, text) {
-					log.Printf("audiobook: 跳过目录章节 第 %d 章（%s）", chapter+1, title)
-					chapter++
-					continue
-				}
 				appendChunks(title, chapter, splitTextChunks(text, maxChars))
 			}
 			chapter++
