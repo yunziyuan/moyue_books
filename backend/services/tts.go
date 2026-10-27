@@ -36,7 +36,7 @@ const (
 	EngineGPTSovits  = "gpt-sovits"
 	EngineFishSpeech = "fish-speech"
 	EngineChatTTS    = "chattts"
-	EngineAuto = "auto"
+	EngineAuto       = "auto"
 )
 
 // EmotionPresets 情感预设：key -> 注入到合成文本前的情感描述
@@ -351,7 +351,7 @@ func synthesizeEdgeTTSDirect(text string, speedFactor float64, emotion, voice st
 	rate := EdgeTTSSpeedToRate(speedFactor * ep.SpeedFactor)
 	data, err := SynthesizeEdgeTTS(text, voice, rate, ep.Volume, ep.Pitch)
 	if err != nil {
-		return nil, "", fmt.Errorf("Edge TTS 合成失败：%v", err)
+		return nil, "", err
 	}
 	return data, "audio/mpeg", nil
 }

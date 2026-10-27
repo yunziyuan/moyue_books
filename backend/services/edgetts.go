@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/difyz9/edge-tts-go/pkg/communicate"
-	"github.com/difyz9/edge-tts-go/pkg/types"
-	"github.com/difyz9/edge-tts-go/pkg/voices"
 )
 
 const (
@@ -20,6 +17,28 @@ const (
 	// EdgeTTSDefaultVoiceShort 默认音色的 short name（用于设置项存储、前端下拉与 Go 直连合成）
 	EdgeTTSDefaultVoiceShort = "zh-CN-XiaoxiaoNeural"
 )
+
+// edgeTTSMaxConcurrency 同时进行的 Edge TTS 网络连接（WebSocket）上限。
+// 微软在线 TTS 是共享免费服务，对单 IP 的并发连接容忍度极低——过多并发会直接拒绝
+// 或重置 WS 连接（表现为 websocket: bad handshake / connection reset），导致有声书
+// 并发合成失败。因此默认串行（1）以保证稳定；如需更高吞吐，可经环境变量
+// EDGE_TTS_MAX_CONCURRENCY 放宽（建议 ≤4，过大仍会被上游掐断）。
+// 该闸门在 Edge TTS 网络层生效，无论有声书多少任务、每个任务多少路段，到微软的实际
+// 并发连接数都被硬性限制，等价于"Edge TTS 不使用并发"。
+var edgeTTSMaxConcurrency = func() int {
+	n, _ := strconv.Atoi(os.Getenv("EDGE_TTS_MAX_CONCURRENCY"))
+	if n <= 0 {
+		n = 1
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}()
+
+// edgeTTSConcurrencySem 全局 Edge TTS 并发信号量：每个到微软的合成调用（含长文本
+// 内部重连、拆半重试）都必须先占用一个名额，释放前其余调用排队。
+var edgeTTSConcurrencySem = make(chan struct{}, edgeTTSMaxConcurrency)
 
 // EdgeTTSProxy 返回 edge-tts 专用代理地址：优先 EDGE_TTS_PROXY，回退通用
 // HTTPS_PROXY / https_proxy。受限网络（国内/部分云主机）下微软端点会拒绝握手（403），
@@ -72,27 +91,8 @@ func normalizeEdgeTTSVoice(voice string) string {
 	return voice
 }
 
-// edgeTTSFriendlyName 为音色生成友好显示名（优先使用接口返回的 FriendlyName）。
-func edgeTTSFriendlyName(v types.Voice) string {
-	if v.FriendlyName != "" {
-		return v.FriendlyName
-	}
-	// ShortName 形如 zh-CN-XiaoxiaoNeural 或 zh-CN-liaoning-XiaobeiNeural
-	parts := strings.Split(v.ShortName, "-")
-	if len(parts) >= 2 {
-		voiceName := parts[len(parts)-1]
-		locale := strings.Join(parts[:len(parts)-1], "-")
-		localeName := locale
-		if name, ok := edgeTTSLocaleNames[locale]; ok {
-			localeName = name
-		}
-		return fmt.Sprintf("%s（%s）", voiceName, localeName)
-	}
-	if v.Name != "" {
-		return v.Name
-	}
-	return v.ShortName
-}
+// edgeTTSFriendlyName 为音色生成友好显示名（定义在 edgetts_ws.go，接收原始
+// types.Voice；在 edgeTTSListVoices 中已完成计算，本处仅直接采用）。
 
 var (
 	edgeTTSCache     []EdgeTTSVoice
@@ -107,7 +107,7 @@ func ListEdgeTTSVoices() []EdgeTTSVoice {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	vlist, err := voices.ListVoices(ctx, EdgeTTSProxy())
+	vlist, err := edgeTTSListVoices(ctx, EdgeTTSProxy())
 	if err != nil {
 		return nil
 	}
@@ -119,7 +119,7 @@ func ListEdgeTTSVoices() []EdgeTTSVoice {
 		}
 		list = append(list, EdgeTTSVoice{
 			ShortName:    v.ShortName,
-			FriendlyName: edgeTTSFriendlyName(v),
+			FriendlyName: v.FriendlyName, // 已在 edgeTTSListVoices 内计算
 			Gender:       v.Gender,
 			Locale:       v.Locale,
 		})
@@ -170,13 +170,14 @@ func EdgeTTSEmotionParams(emotion string) EdgeTTSEmotion {
 	}
 }
 
-// SynthesizeEdgeTTS 使用微软 Edge TTS 在线合成语音（Go 直连 difyz9/edge-tts-go，
-// 无需本地 Python tts-service），返回 MP3 音频字节。voice 为空时使用默认中文女声
-// short name（zh-CN-XiaoxiaoNeural）。
-// 受限网络下微软端点可能 403：设置 EDGE_TTS_PROXY（或 HTTPS_PROXY）后自动经代理出网；
-// 该库在收到 403 时会依据服务端 Date 头自动校正本地时钟偏移并重试，规避时钟偏差导致的
-// Sec-MS-GEC 令牌被拒（旧实现偶发 403/bad handshake 的根因）。
-// 文本内部的 XML 特殊字符（& < > 等）由库内部转义，并对超长文本按字节自动切分。
+// SynthesizeEdgeTTS 使用微软 Edge TTS 在线合成语音（Go 直连，自实现 websocket 客户端，
+// 无需本地 Python tts-service 也不依赖 difyz9 的网络层），返回 MP3 音频字节。
+// voice 为空时使用默认中文女声 short name（zh-CN-XiaoxiaoNeural）。
+// 受限网络下微软端点可能 403/握手失败：设置 EDGE_TTS_PROXY（或 HTTPS_PROXY）后自动经
+// 代理出网，支持 http/https/socks5 三类代理；未配置代理时强制直连（不再盲从环境中
+// 的 HTTP_PROXY，避免被不可达系统代理连累导致 websocket: bad handshake）。
+// 收到 403 时依据服务端 Date 头自动校正本地时钟偏移并重试，规避时钟偏差导致的
+// Sec-MS-GEC 令牌被拒。文本内部的 XML 特殊字符由内部转义，超长文本按字节自动切分。
 func SynthesizeEdgeTTS(text, voice, rate, volume, pitch string) ([]byte, error) {
 	voice = normalizeEdgeTTSVoice(voice)
 	if rate == "" {
@@ -189,31 +190,19 @@ func SynthesizeEdgeTTS(text, voice, rate, volume, pitch string) ([]byte, error) 
 		pitch = "+0Hz"
 	}
 
-	comm, err := communicate.NewCommunicate(
-		text, voice, rate, volume, pitch,
-		EdgeTTSProxy(), 15, 120,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("初始化 Edge TTS 失败：%v", err)
-	}
+	// 占用 Edge TTS 全局并发名额：硬性限制到微软的并发连接数（默认 1），
+	// 避免并发过高被上游拒绝/重置（websocket: bad handshake）。其余调用排队。
+	edgeTTSConcurrencySem <- struct{}{}
+	defer func() { <-edgeTTSConcurrencySem }()
 
-	// 设置整体超时，避免网络静默丢包时 websocket 握手/读取无限挂起（difyz9 内部
-	// HandshakeTimeout 为 0 不兜底）；与既有 HTTP 转发 180s 超时保持一致。
+	// 整体超时，避免网络静默丢包时 websocket 握手/读取无限挂起；
+	// 自实现客户端内部已对读消息做 ctx 约束，并设了 15s 握手超时。
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	chunkChan, errChan := comm.Stream(ctx)
-	var audioBuf []byte
-	for chunk := range chunkChan {
-		if chunk.Type == "audio" {
-			audioBuf = append(audioBuf, chunk.Data...)
-		}
-	}
-	if err := <-errChan; err != nil {
+	data, err := edgeTTSSynthesize(ctx, text, voice, rate, volume, pitch, EdgeTTSProxy())
+	if err != nil {
 		return nil, fmt.Errorf("Edge TTS 合成失败：%v", err)
 	}
-	if len(audioBuf) == 0 {
-		return nil, fmt.Errorf("Edge TTS 未返回音频数据")
-	}
-	return audioBuf, nil
+	return data, nil
 }
