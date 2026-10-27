@@ -147,6 +147,97 @@ func (e *EPUBReader) GetResource(path string) ([]byte, error) {
 	return nil, fmt.Errorf("resource not found: %s", path)
 }
 
+// epubChapter 一个已切分的章节：标题与原始 HTML 片段。
+type epubChapter struct {
+	Title string
+	HTML  []byte
+}
+
+// fileposAnchorRE 匹配 Calibre 等生成的单文件多章 EPUB 中用于定位章节的锚点
+// （如 <span id="filepos0000019107">），章节标题只存在于 NCX/NAV，正文靠这些锚点切分。
+var fileposAnchorRE = regexp.MustCompile(`<[^>]*\bid="(filepos\d+)"[^>]*>`)
+
+type fileposAnchor struct {
+	off int
+	id  string
+}
+
+// findFileposAnchors 返回 HTML 中所有 filepos 锚点的字节偏移与 id（按出现顺序）。
+func findFileposAnchors(raw []byte) []fileposAnchor {
+	var res []fileposAnchor
+	for _, loc := range fileposAnchorRE.FindAllIndex(raw, -1) {
+		m := fileposAnchorRE.FindSubmatch(raw[loc[0]:loc[1]])
+		res = append(res, fileposAnchor{off: loc[0], id: string(m[1])})
+	}
+	return res
+}
+
+// readFile 按路径读取 EPUB 内单个文件的原始字节。
+func (e *EPUBReader) readFile(path string) ([]byte, error) {
+	for _, f := range e.reader.File {
+		if f.Name == path || filepath.ToSlash(f.Name) == filepath.ToSlash(path) {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+			return io.ReadAll(rc)
+		}
+	}
+	return nil, fmt.Errorf("content not found: %s", path)
+}
+
+// Chapters 将整本 EPUB 切分为章节。单文件多章（filepos 锚点）按锚点切分、标题取自
+// NCX/NAV；无锚点的文件按整文件成章（多文件 EPUB 每文件即一章）。这样既能处理
+// "章节 N" 退化为单一巨章、标题全塌成"前折页"的劣质 EPUB，也对规范 EPUB 保持原行为。
+func (e *EPUBReader) Chapters() []epubChapter {
+	anchorTitle, fileTitle := epubAnchorTitles(e)
+	var chs []epubChapter
+	for _, path := range e.Contents {
+		raw, err := e.readFile(path)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		anchors := findFileposAnchors(raw)
+		if len(anchors) == 0 {
+			title := fileTitle[filepath.Base(filepath.ToSlash(path))]
+			if title == "" {
+				title = fmt.Sprintf("章节 %d", len(chs)+1)
+			}
+			chs = append(chs, epubChapter{Title: title, HTML: raw})
+			continue
+		}
+		prev := 0
+		for k, a := range anchors {
+			slice := raw[prev:a.off]
+			var title string
+			if k == 0 {
+				// 首个锚点之前的前置内容（前折页/目录/序等）
+				title = fileTitle[filepath.Base(filepath.ToSlash(path))]
+				if title == "" {
+					title = "前折页"
+				}
+			} else {
+				title = anchorTitle[anchors[k-1].id]
+			}
+			if title == "" {
+				title = fmt.Sprintf("章节 %d", len(chs)+1)
+			}
+			chs = append(chs, epubChapter{Title: title, HTML: slice})
+			prev = a.off
+		}
+		// 最后一个锚点之后的内容（尾声/后记）
+		tail := raw[prev:]
+		tailTitle := anchorTitle[anchors[len(anchors)-1].id]
+		if tailTitle == "" {
+			tailTitle = "尾声"
+		}
+		chs = append(chs, epubChapter{Title: tailTitle, HTML: tail})
+	}
+	return chs
+}
+
+
 // GetChapterList 获取章节列表
 func (e *EPUBReader) GetChapterList() []map[string]interface{} {
 	var chapters []map[string]interface{}

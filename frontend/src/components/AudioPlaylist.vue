@@ -23,11 +23,11 @@
 
       <div class="gpp-list">
         <div
-          v-for="seg in segments"
+          v-for="(seg, i) in segments"
           :key="seg.index"
           class="gpp-item"
-          :class="[seg.done ? 'done' : 'pending', { active: currentIndex === seg.index }]"
-          @click="$emit('play-segment', seg.index)"
+          :class="[seg.done ? 'done' : 'pending', { active: currentIndex === i }]"
+          @click="$emit('play-segment', i)"
         >
           <span class="gpp-idx">{{ seg.index }}</span>
           <div class="gpp-info">

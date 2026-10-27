@@ -580,7 +580,34 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 	}
 
 	switch ft {
-	case "epub", "kepub", "azw3", "mobi":
+	case "epub", "kepub":
+		// EPUB 按真实章节切分：单文件多章（filepos 锚点）用 NCX/NAV 锚点切成章节，
+		// 多文件 EPUB 每文件即一章；标题取自目录，避免劣质 EPUB 退化成单一巨章、
+		// 所有分段标题塌成"前折页"（节目目录与内容错位）。
+		ep, err := OpenEPUB(filePath)
+		if err != nil {
+			return nil, err
+		}
+		defer ep.Close()
+		chaps := ep.Chapters()
+		for i, ch := range chaps {
+			if len(segs) >= audiobookMaxSegments {
+				break
+			}
+			title := ch.Title
+			if title == "" {
+				title = fmt.Sprintf("第 %d 章", i+1)
+			}
+			if isTOCSection(title, htmlToTextKeepLines(ch.HTML)) {
+				log.Printf("audiobook: 跳过目录章节 %s", title)
+				continue
+			}
+			text := CleanBookText(htmlToText(ch.HTML), DefaultAudioBookCleanConfig)
+			if t := strings.TrimSpace(text); t != "" {
+				appendChunks(title, i, splitTextChunks(t, maxChars))
+			}
+		}
+	case "mobi", "azw3":
 		var reader interface {
 			GetContent(int) ([]byte, error)
 			Close()
@@ -591,42 +618,50 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 			if err != nil {
 				return nil, err
 			}
-			defer r.Close()
 			reader = r
 		case "azw3":
 			az, err := OpenAZW3(filePath)
 			if err != nil {
 				return nil, err
 			}
-			defer az.Close()
 			reader = az
-		default:
-			ep, err := OpenEPUB(filePath)
-			if err != nil {
-				return nil, err
-			}
-			defer ep.Close()
-			reader = ep
 		}
+		defer reader.Close()
 		// 用目录标题命名分段；无目录时退回"章节 N"
 		toc, _ := ExtractTOC(filePath, ft)
 		titleBy := map[int]string{}
 		if len(toc) > 0 {
 			for _, it := range toc {
+				// 同页多条目录时保留最先出现的：更早的章节才从该页开头开始，
+				// 后到的多为下一节的标题（若其真实起点在后续页）
 				if it.Title != "" {
-					titleBy[it.Index] = it.Title
+					if _, ok := titleBy[it.Index]; !ok {
+						titleBy[it.Index] = it.Title
+					}
 				}
 			}
 		}
+		// mobi 为 reflow 分页：一节常横跨多页，无目录条目的页是上一节的延续，
+		// 标题应标"（续）"而非误报"第 N 章"（azw3 按章节切分，不适用）。
+		reflow := ft == "mobi"
+		lastSection := ""
 		chapter := 0
 		for len(segs) < audiobookMaxSegments {
 			content, err := reader.GetContent(chapter)
 			if err != nil {
 				break
 			}
+			_, hasTOC := titleBy[chapter]
 			title := titleBy[chapter]
 			if title == "" {
-				title = fmt.Sprintf("第 %d 章", chapter+1)
+				if reflow && lastSection != "" {
+					title = lastSection + "（续）"
+				} else {
+					title = fmt.Sprintf("第 %d 章", chapter+1)
+				}
+			}
+			if hasTOC {
+				lastSection = title
 			}
 			// 目录页检测必须用「保留换行、未清洗」的文本：
 			// 1) htmlToText 会把无句读结尾的短行合并成一行，破坏 looksLikeTOCList

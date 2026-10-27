@@ -15,3 +15,8 @@ func extractMobiMetadataImpl(path string) (*BookMetadata, error) {
 	}
 	return &m, nil
 }
+
+// extractMobiTOCImpl 默认（无 nocgo 标签）构建下回退到纯 Go 解析器的目录。
+func extractMobiTOCImpl(path string) ([]TOCItem, error) {
+	return extractAZW3TOC(path)
+}

@@ -36,8 +36,12 @@ func ExtractTOC(filePath, fileType string) ([]TOCItem, error) {
 	switch ft {
 	case "epub", "kepub":
 		return extractEPUBTOC(filePath), nil
-	case "azw3", "mobi":
+	case "azw3":
 		return extractAZW3TOC(filePath)
+	case "mobi":
+		// nocgo 构建（go-fitz/MuPDF）下目录来自 MuPDF 大纲：老式 MOBI7 的
+		// 纯 Go NCX 解析标题会乱码，MuPDF 大纲标题干净且页号与正文页对齐。
+		return extractMobiTOC(filePath)
 	case "md":
 		return extractMarkdownTOC(filePath), nil
 	case "pdf":
@@ -201,6 +205,28 @@ func collectNAV(li []navLI, level int, spine []string, items *[]TOCItem) {
 			collectNAV(l.OL.Li, level+1, spine, items)
 		}
 	}
+}
+
+// epubAnchorTitles 收集 EPUB 目录中带锚点的条目标题（锚点 id → 标题），
+// 以及无锚点条目按文件基名映射的标题（文件基名 → 标题）。用于把单文件多章的
+// EPUB（Calibre 生成的 filepos 锚点）切成真实章节并命名；多文件 EPUB 每文件成章时也用得到。
+func epubAnchorTitles(e *EPUBReader) (anchorTitle map[string]string, fileTitle map[string]string) {
+	anchorTitle = map[string]string{}
+	fileTitle = map[string]string{}
+	// 复用既有 EPUB 目录解析（NCX/NAV，已验证可用），从中提取锚点→标题与
+	// 文件→标题两份映射，供单文件多章 EPUB 按 filepos 锚点切分命名。
+	toc := extractEPUBTOC(e.Path)
+	for _, it := range toc {
+		if it.Title == "" {
+			continue
+		}
+		if it.Anchor != "" {
+			anchorTitle[it.Anchor] = it.Title
+		} else if it.Path != "" {
+			fileTitle[filepath.Base(filepath.ToSlash(it.Path))] = it.Title
+		}
+	}
+	return anchorTitle, fileTitle
 }
 
 // spineIndex 将目录条目 href 映射到 spine 文件序号。

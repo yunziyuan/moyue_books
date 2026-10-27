@@ -17,3 +17,10 @@ func openMobiReader(path string) (mobiReaderIface, error) {
 func ExtractMobiMetadata(path string) (*BookMetadata, error) {
 	return extractMobiMetadataImpl(path)
 }
+
+// extractMobiTOC 提取 mobi 目录（nocgo 走 go-fitz 的 ToC，否则回退 OpenAZW3）。
+// 纯 Go 解析器在老式 MOBI7 上 NCX/字符表定位有缺陷，目录标题会乱码，
+// 因此 nocgo 构建下优先用 MuPDF 的大纲（标题干净、页号与 reflow 页对齐）。
+func extractMobiTOC(path string) ([]TOCItem, error) {
+	return extractMobiTOCImpl(path)
+}
