@@ -42,6 +42,7 @@ import ReadingPrefs from './settings/ReadingPrefs.vue'
 import AccountSettings from './settings/AccountSettings.vue'
 import Appearance from './settings/Appearance.vue'
 import Feedback from './settings/Feedback.vue'
+import OpenSource from './settings/OpenSource.vue'
 
 // ===== 设置分类注册表：后续新增设置功能时，只需在此追加一项 =====
 const sections = [
@@ -72,6 +73,13 @@ const sections = [
     desc: 'QQ · 邮件反馈',
     icon: 'ChatDotRound',
     component: markRaw(Feedback)
+  },
+  {
+    key: 'opensource',
+    label: '开源说明',
+    desc: '协议 · 开源地址',
+    icon: 'Link',
+    component: markRaw(OpenSource)
   }
 ]
 
