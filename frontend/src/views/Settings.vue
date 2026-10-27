@@ -43,6 +43,7 @@ import AccountSettings from './settings/AccountSettings.vue'
 import Appearance from './settings/Appearance.vue'
 import Feedback from './settings/Feedback.vue'
 import OpenSource from './settings/OpenSource.vue'
+import ReleaseNotes from './settings/ReleaseNotes.vue'
 
 // ===== 设置分类注册表：后续新增设置功能时，只需在此追加一项 =====
 const sections = [
@@ -80,6 +81,13 @@ const sections = [
     desc: '协议 · 开源地址',
     icon: 'Link',
     component: markRaw(OpenSource)
+  },
+  {
+    key: 'releasenotes',
+    label: '版本升级',
+    desc: '更新日志 · 说明',
+    icon: 'Histogram',
+    component: markRaw(ReleaseNotes)
   }
 ]
 
