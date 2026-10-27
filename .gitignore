@@ -33,3 +33,5 @@ backend/data/moyue.db-shm
 backend/data/moyue.db-wal
 backend/data/tts-models
 server.log
+mise.toml
+.vscode/*
