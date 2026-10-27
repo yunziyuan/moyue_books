@@ -827,22 +827,14 @@ func decompressPalmDOC(data []byte) []byte {
 			p++
 			m := (c >> 3) & 0x07FF
 			n := (c & 7) + 3
-			if m == 0 {
-				m = 1
-			}
 			l := len(out)
-			if l < m {
+			if m == 0 || l < m {
 				break
 			}
-			if m > n {
-				if l >= m+n {
-					out = append(out, out[l-m:l-m+n]...)
-				}
-			} else {
-				ref := out[l-m]
-				for k := 0; k < n; k++ {
-					out = append(out, ref)
-				}
+			// 重叠回引（n > m）必须按滑动窗口逐字节复制，
+			// 即每次追加后源窗口随之增长（PalmDOC run-length 语义）
+			for k := 0; k < n; k++ {
+				out = append(out, out[l-m+k])
 			}
 		}
 	}
