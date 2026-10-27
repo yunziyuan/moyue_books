@@ -124,16 +124,17 @@ const onClick = () => emit('click', props.book)
 .book-card:hover::before {
   opacity: 1;
 }
+/* 用百分比 padding 撑出 3:4 封面，保证有图/无图（占位）时高度一致 */
 .book-cover-wrapper {
   position: relative;
-  aspect-ratio: 3/4;
+  width: 100%;
+  padding-top: 133.3333%;
   overflow: hidden;
   background: linear-gradient(160deg, #1e293b, #0f172a);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .book-cover {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -154,12 +155,16 @@ const onClick = () => emit('click', props.book)
   transform: translateX(120%);
 }
 .book-cover-placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   color: #94a3b8;
   padding: 20px;
   text-align: center;
+  overflow: hidden;
 }
 .book-cover-placeholder span {
   margin-top: 12px;
