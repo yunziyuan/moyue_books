@@ -1,5 +1,8 @@
 <template>
-  <div class="setup-page">
+  <div
+    class="setup-page"
+    :style="keyboardOffset ? { paddingBottom: keyboardOffset + 'px' } : null"
+  >
     <div class="bg-glow bg-glow-1"></div>
     <div class="bg-glow bg-glow-2"></div>
 
@@ -7,7 +10,7 @@
       <div class="logo">
         <el-icon :size="34"><Reading /></el-icon>
       </div>
-      <h1 class="title">连接你的墨阅书架</h1>
+      <h1 class="title">连接你的墨阅书屋</h1>
       <p class="subtitle">
         本应用通过局域网 / 公网连接你<strong>飞牛 fnOS</strong> 上部署的 moyue-books 服务。<br />
         请填写该服务的访问地址，所有书籍与阅读进度都保存在你的服务器上。
@@ -25,6 +28,21 @@
           >
           </el-input>
         </el-form-item>
+
+        <div v-if="savedList.length" class="saved-list">
+          <span class="saved-label">已保存的服务器</span>
+          <div class="saved-chips">
+            <button
+              v-for="item in savedList"
+              :key="item"
+              type="button"
+              class="saved-chip"
+              @click="serverInput = item; onConnect()"
+            >
+              {{ item }}
+            </button>
+          </div>
+        </div>
 
         <div class="hint">
           可含或不含 <code>/api</code> 后缀；支持 <code>http</code> / <code>https</code>。
@@ -65,21 +83,47 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Link, Reading } from '@element-plus/icons-vue'
-import { getServerUrl, setServerUrl, normalizeServerUrl, probeServer } from '@/utils/serverConfig'
+import { getServerUrl, getServerList, saveServer, normalizeServerUrl, probeServer } from '@/utils/serverConfig'
 import { clearToken, setUser } from '@/api/auth'
 
 const serverInput = ref('')
 const savedServer = ref('')
+const savedList = ref([])
 const testing = ref(false)
 const error = ref('')
 const ok = ref('')
 
+// 移动端键盘高度：用 visualViewport 计算，撑开底部空间让输入框/按钮可滚到键盘上方
+const keyboardOffset = ref(0)
+let viewportHandler = null
+
+const updateKeyboard = () => {
+  if (!window.visualViewport) return
+  const vv = window.visualViewport
+  const keyboard = window.innerHeight - vv.height - vv.offsetTop
+  keyboardOffset.value = keyboard > 0 ? keyboard : 0
+}
+
 onMounted(() => {
   savedServer.value = getServerUrl()
+  savedList.value = getServerList().filter((u) => u !== savedServer.value)
   serverInput.value = savedServer.value
+  if (window.visualViewport) {
+    viewportHandler = () => requestAnimationFrame(updateKeyboard)
+    window.visualViewport.addEventListener('resize', viewportHandler)
+    window.visualViewport.addEventListener('scroll', viewportHandler)
+    updateKeyboard()
+  }
+})
+
+onUnmounted(() => {
+  if (window.visualViewport && viewportHandler) {
+    window.visualViewport.removeEventListener('resize', viewportHandler)
+    window.visualViewport.removeEventListener('scroll', viewportHandler)
+  }
 })
 
 async function onConnect() {
@@ -94,11 +138,14 @@ async function onConnect() {
   try {
     const info = await probeServer(raw)
     // 连通成功：保存地址，并清除旧 token（不同服务器 = 不同账号）
-    setServerUrl(raw)
+    saveServer(raw)
     clearToken()
     setUser(null)
     ok.value = `已连接${info?.app_name ? '：' + info.app_name : ''}，正在进入…`
-    setTimeout(() => location.reload(), 600)
+    // 整页重载并直接落到登录页：保证 API_BASE 按新地址重建，且不再停留在设置页
+    setTimeout(() => {
+      window.location.replace(`${import.meta.env.BASE_URL}#/login`)
+    }, 600)
   } catch (e) {
     if (e?.name === 'AbortError') {
       error.value = '连接超时，请确认地址与网络可达（同一局域网）'
@@ -114,16 +161,19 @@ async function onConnect() {
 <style scoped>
 .setup-page {
   position: relative;
-  min-height: 100vh;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   padding: 24px;
+  padding-top: max(24px, env(safe-area-inset-top));
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: hidden; /* 固定一屏，禁止上下滑动 */
 }
 .bg-glow {
-  position: fixed;
+  position: absolute;
   border-radius: 50%;
   filter: blur(90px);
   pointer-events: none;
@@ -142,8 +192,10 @@ async function onConnect() {
 .setup-card {
   position: relative;
   z-index: 1;
+  margin: auto; /* 有空间时垂直居中；键盘弹出时随底部留白整体上移 */
   width: 100%;
   max-width: 440px;
+  box-sizing: border-box; /* 关键：padding 计入宽度，否则 100%+66px 溢出屏幕 */
   padding: 36px 32px 28px;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.82);
@@ -191,6 +243,39 @@ async function onConnect() {
   font-weight: 700;
   letter-spacing: 1px;
 }
+.saved-list {
+  margin-bottom: 18px;
+  text-align: left;
+}
+.saved-label {
+  display: block;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.saved-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.saved-chip {
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.saved-chip:active {
+  transform: scale(0.96);
+  background: rgba(99, 102, 241, 0.16);
+}
 .err {
   margin-top: 16px;
   text-align: left;
@@ -199,5 +284,17 @@ async function onConnect() {
   margin-top: 22px;
   font-size: 11px;
   color: #cbd5e1;
+}
+
+/* 矮屏（或键盘弹出后剩余空间小）：收紧间距，保证整卡不超出固定一屏 */
+@media (max-height: 760px) {
+  .setup-page { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: 12px; }
+  .setup-card { padding: 22px 22px 18px; border-radius: 18px; }
+  .logo { width: 52px; height: 52px; margin-bottom: 10px; }
+  .title { font-size: 19px; margin-bottom: 6px; }
+  .subtitle { margin-bottom: 14px; font-size: 12px; }
+  .hint { margin-bottom: 12px; }
+  .saved-list { margin-bottom: 12px; }
+  .foot { margin-top: 14px; }
 }
 </style>

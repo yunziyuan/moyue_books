@@ -34,8 +34,12 @@ const onAgreementAgreed = () => {
   agreementAgreed.value = true
 }
 
-// 登录、分享预览等独立页面：不套应用框架，全屏渲染
-const isPublicPage = computed(() => route.path === '/login' || route.path.startsWith('/share/'))
+// 登录、分享预览、服务器连接等独立页面：不套应用框架（移动端抽屉/顶栏），全屏渲染
+const isPublicPage = computed(() =>
+  route.path === '/login' ||
+  route.path.startsWith('/share/') ||
+  route.path === '/server-setup'
+)
 </script>
 
 <style scoped>

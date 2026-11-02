@@ -17,13 +17,6 @@
       <el-dropdown trigger="click" popper-class="user-popper" @command="handleUserCommand">
         <div class="m-header-avatar">{{ avatarText }}</div>
         <template #dropdown>
-          <div class="user-popper-header">
-            <div class="user-popper-avatar">{{ avatarText }}</div>
-            <div class="user-popper-info">
-              <div class="user-popper-name">{{ displayName }}</div>
-              <div class="user-popper-sub">{{ username || '未登录' }}</div>
-            </div>
-          </div>
           <el-dropdown-menu>
             <el-dropdown-item command="logout">
               <el-icon><SwitchButton /></el-icon>
@@ -55,14 +48,6 @@
               <span class="m-drawer-brand-name">{{ siteName }}</span>
               <span class="m-drawer-brand-version">v{{ APP_VERSION }}</span>
             </div>
-          </div>
-        </div>
-
-        <div class="m-drawer-user">
-          <div class="m-drawer-avatar">{{ avatarText }}</div>
-          <div class="m-drawer-user-info">
-            <div class="m-drawer-name">{{ displayName }}</div>
-            <div class="m-drawer-sub">{{ username || '未登录' }}</div>
           </div>
         </div>
 
@@ -134,7 +119,6 @@ const isCustomLogo = computed(() => isCustomIcon(appPrefs.value.siteIcon))
 
 const user = ref(getUser())
 const displayName = computed(() => user.value?.nickname || user.value?.username || '未登录')
-const username = computed(() => user.value?.username || '')
 const avatarText = computed(() => (displayName.value || 'U').charAt(0).toUpperCase())
 
 const handleUserCommand = (cmd) => {
@@ -180,13 +164,18 @@ const menuItems = [
   { path: '/categories', label: '分类管理', icon: 'FolderOpened' },
   { path: '/libraries', label: '媒体库', icon: 'Collection' },
   { path: '/stats', label: '阅读统计', icon: 'TrendCharts' },
-  { path: '/reviews', label: '读后感', icon: 'Notebook' }
+  { path: '/reviews', label: '读后感', icon: 'Notebook' },
+  { path: '/settings?tab=server', label: '服务器地址', icon: 'Connection' }
 ]
 
 const isNavActive = (item) => {
-  if (route.path.startsWith('/book/')) return item.path === '/bookshelf'
-  if (route.path.startsWith('/library/')) return item.path === '/libraries'
-  return route.path === item.path || route.path.startsWith(item.path + '/')
+  const [base, q] = item.path.split('?')
+  if (route.path.startsWith('/book/')) return base === '/bookshelf'
+  if (route.path.startsWith('/library/')) return base === '/libraries'
+  if (route.path !== base) return false
+  if (!q) return true
+  const params = new URLSearchParams(q)
+  return [...params.keys()].every((k) => route.query[k] === params.get(k))
 }
 
 // 回到顶部

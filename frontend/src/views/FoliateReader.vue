@@ -680,8 +680,8 @@ function withToken(url) {
 function buildCSS() {
   const t = THEMES[theme.value] || THEMES.light
   const ff = fontFamily.value || DEFAULT_FONT
-  // 文字到纸张边缘的留白：移动端 24px，桌面 48~96px（随视口宽度增长）
-  const sidePad = isMobile.value ? '24px' : 'max(48px, 5vw)'
+  // 文字到纸张边缘的留白：移动端 5px（贴近屏幕边缘、内容更宽），桌面 48~96px（随视口宽度增长）
+  const sidePad = isMobile.value ? '5px' : 'max(48px, 5vw)'
   return `
     html { font-size: ${fontSize.value}px !important; }
     body {

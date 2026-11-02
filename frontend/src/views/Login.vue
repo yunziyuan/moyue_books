@@ -1,6 +1,6 @@
 <template>
   <div class="login-page">
-    <div class="login-card">
+    <div class="login-card" :style="{ paddingBottom: keyboardOffset + 'px' }">
       <div class="brand">
         <div class="brand-icon">
           <el-icon :size="26"><Collection /></el-icon>
@@ -55,12 +55,12 @@
       </div>
     </div>
 
-    <p class="footer-tip">首次注册的用户将自动接管本机已有书库数据</p>
+    <p class="footer-tip" :class="{ hidden: keyboardOffset > 0 }">首次注册的用户将自动接管本机已有书库数据</p>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Postcard } from '@element-plus/icons-vue'
@@ -73,6 +73,33 @@ const mode = ref('login')
 const loading = ref(false)
 const loginFormRef = ref(null)
 const regFormRef = ref(null)
+
+// 移动端键盘高度：用 visualViewport 计算，撑开底部空间让输入框可滚到键盘上方
+const keyboardOffset = ref(0)
+let viewportHandler = null
+
+const updateKeyboard = () => {
+  if (!window.visualViewport) return
+  const vv = window.visualViewport
+  const keyboard = window.innerHeight - vv.height - vv.offsetTop
+  keyboardOffset.value = keyboard > 0 ? keyboard : 0
+}
+
+onMounted(() => {
+  if (window.visualViewport) {
+    viewportHandler = () => requestAnimationFrame(updateKeyboard)
+    window.visualViewport.addEventListener('resize', viewportHandler)
+    window.visualViewport.addEventListener('scroll', viewportHandler)
+    updateKeyboard()
+  }
+})
+
+onUnmounted(() => {
+  if (window.visualViewport && viewportHandler) {
+    window.visualViewport.removeEventListener('resize', viewportHandler)
+    window.visualViewport.removeEventListener('scroll', viewportHandler)
+  }
+})
 
 const loginForm = reactive({ username: '', password: '' })
 const regForm = reactive({ username: '', nickname: '', password: '', confirmPassword: '' })
@@ -313,14 +340,14 @@ const onSubmit = async () => {
     min-height: 100vh;
     min-height: 100dvh;
     margin: 0;
-    padding: 32px 24px 56px;
+    padding: calc(env(safe-area-inset-top, 0px) + 44px) 24px 56px;
     border-radius: 0;
     border: none;
     background: rgba(255, 255, 255, 0.82);
     box-shadow: none;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     overflow-y: auto;
   }
@@ -363,6 +390,10 @@ const onSubmit = async () => {
     font-size: 11px;
     line-height: 1.7;
     text-align: center;
+  }
+  /* 键盘弹出时隐藏底部提示，避免遮挡可滚动的输入框 */
+  .footer-tip.hidden {
+    display: none;
   }
   .brand {
     margin-bottom: 28px;

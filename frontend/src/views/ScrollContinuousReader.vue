@@ -1319,13 +1319,15 @@ watch(() => props.annotations, (next) => {
 }
 
 /* 窄屏：纸张铺满、去掉圆角与阴影，章节在屏幕内连续流动，无"卡片断开"感 */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .scr-column {
     max-width: 100%;
     margin: 0;
     border-radius: 0;
     box-shadow: none;
-    padding: 16px 18px 40px;
+    /* 横向内边距归零，正文贴边（移动端 5px 留白由章节 iframe 的 body padding 控制），
+       否则纸张自身 18px 内边距会让正文离屏幕边缘仍有约 23px */
+    padding: 16px 0 40px;
     min-height: 100%;
   }
 }
