@@ -1,6 +1,8 @@
 import './polyfills.js' // 旧版 WebView 兼容：Object.groupBy / Map.groupBy（foliate-js 依赖）
 import { createApp } from 'vue'
 import axios from 'axios'
+import { Capacitor } from '@capacitor/core'
+import { capacitorAxiosAdapter } from '@/utils/nativeHttp'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
@@ -34,6 +36,11 @@ axios.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// 移动端：让所有 axios 请求走原生层(HttpPlugin)，绕开 WebView 的私有网络访问(PNA)拦截
+if (Capacitor.isNativePlatform()) {
+  axios.defaults.adapter = capacitorAxiosAdapter
+}
 
 const app = createApp(App)
 

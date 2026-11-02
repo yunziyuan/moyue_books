@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from '@/api/auth'
+import { getServerUrl } from '@/utils/serverConfig'
 import Bookshelf from '@/views/Bookshelf.vue'
 import ReaderEntry from '@/views/ReaderEntry.vue'
 import Upload from '@/views/Upload.vue'
@@ -14,6 +15,7 @@ import LibraryHub from '@/views/LibraryHub.vue'
 import Login from '@/views/Login.vue'
 import SharePreview from '@/views/SharePreview.vue'
 import AudiobookSharePreview from '@/views/AudiobookSharePreview.vue'
+import ServerSetup from '@/views/ServerSetup.vue'
 
 const routes = [
   { path: '/', redirect: '/bookshelf' },
@@ -34,7 +36,9 @@ const routes = [
   { path: '/stats', name: 'Stats', component: Stats },
   { path: '/reviews', name: 'Reviews', component: () => import('@/views/Reviews.vue') },
   { path: '/reviews/editor', name: 'ReviewEditor', component: () => import('@/views/ReviewEditor.vue') },
-  { path: '/settings', name: 'Settings', component: Settings }
+  { path: '/settings', name: 'Settings', component: Settings },
+  // 移动端 / 远程客户端首次启动：填写飞牛服务器地址（公开，可随时重配）
+  { path: '/server-setup', name: 'ServerSetup', component: ServerSetup, meta: { public: true, setup: true } }
 ]
 
 // hash 模式：兼容 App（WebView file:// 加载）与静态部署，刷新不 404
@@ -46,6 +50,11 @@ const router = createRouter({
 // 全局登录守卫
 router.beforeEach((to) => {
   const token = getToken()
+  const server = getServerUrl()
+  // 未配置服务器地址（移动端远程客户端），且当前不是设置页 / 公开页 → 引导去设置
+  if (!server && !to.meta.public && !to.meta.setup) {
+    return { path: '/server-setup' }
+  }
   if (!to.meta.public && !token) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }

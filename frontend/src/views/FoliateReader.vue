@@ -431,6 +431,7 @@ import { staticBase, API_BASE } from '@/config'
 import { loadReaderPrefs, saveReaderPrefs } from '@/utils/readerPrefs'
 import { useIsMobile } from '@/utils/useDevice'
 import { useTtsPlayer, splitSentences, normTtsText } from '@/utils/ttsPlayer'
+import { nativeFetch } from '@/utils/nativeHttp'
 
 const props = defineProps({
   id: { type: [String, Number], required: true },
@@ -765,14 +766,14 @@ let fileFetchPromise = null
 function prestartFileFetch() {
   if (fileFetchPromise) return fileFetchPromise
   if ((props.book?.file_type || '').toLowerCase() === 'pdf') return null
-  fileFetchPromise = fetch(bookApi.fileUrl(props.id))
+  fileFetchPromise = nativeFetch(bookApi.fileUrl(props.id))
   // 提前失败时不产生未处理的 rejection（openBook 仍会 await 到同一拒绝并走错误分支）
   fileFetchPromise.catch(() => {})
   return fileFetchPromise
 }
 async function fetchBookFile() {
   if (!fileFetchPromise) {
-    fileFetchPromise = fetch(bookApi.fileUrl(props.id))
+    fileFetchPromise = nativeFetch(bookApi.fileUrl(props.id))
     fileFetchPromise.catch(() => {})
   }
   try {

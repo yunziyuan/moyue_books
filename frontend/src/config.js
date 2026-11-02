@@ -1,9 +1,12 @@
 // ===== 前后端服务地址配置 =====
-// 兼容两种访问方式（同一份构建均适用）：
-//   1) 飞牛统一网关：页面经 /app/moyue 前缀由网关反代，API 走 /app/moyue/api
-//   2) 直接 TCP 访问（IP:端口，局域网直连 / 分享链接）：根路径，API 走 /api
-// 优先使用构建时注入的 BASE_URL（fnOS 打包脚本已将 base 设为 /app/moyue/），
-// 未注入（默认相对路径构建）时按运行时路径自动探测网关前缀，保证两种方式都不需要单独构建。
+// 兼容三种访问方式（同一份构建均适用）：
+//   1) 移动端 / 远程客户端：用户在首次启动填写的飞牛服务器地址（运行时 localStorage），优先采用
+//   2) 飞牛统一网关：页面经 /app/moyue 前缀由网关反代，API 走 /app/moyue/api
+//   3) 直接 TCP 访问（IP:端口，局域网直连 / 分享链接）：根路径，API 走 /api
+// 优先使用用户设置的服务器地址；其次使用构建时注入的 BASE_URL（fnOS 打包脚本已将 base 设为 /app/moyue/），
+// 未注入（默认相对路径构建）时按运行时路径自动探测网关前缀，保证多种方式都不需要单独构建。
+import { getServerUrl } from '@/utils/serverConfig'
+
 const KNOWN_GATEWAY_PREFIXES = ['/app/moyue']
 
 function detectGatewayPrefix() {
@@ -20,8 +23,16 @@ const BASE = injectedBase && injectedBase !== '.' && injectedBase !== ''
   ? injectedBase
   : detectGatewayPrefix()
 
-// API 地址：优先用构建时注入的 VITE_API_BASE，否则按 BASE 推导（网关 /app/moyue/api 或直连 /api）
-const API_BASE = (import.meta.env.VITE_API_BASE || (BASE ? BASE + '/api' : '/api')).replace(/\/+$/, '')
+// API 地址：优先使用用户在移动端设置的飞牛服务器地址（运行时，覆盖一切构建期注入）；
+// 否则回退到构建期注入的 VITE_API_BASE，或按 BASE 推导（网关 /app/moyue/api 或直连 /api）
+const savedServer = getServerUrl()
+let API_BASE
+if (savedServer) {
+  const s = savedServer.replace(/\/+$/, '')
+  API_BASE = s.endsWith('/api') ? s : s + '/api'
+} else {
+  API_BASE = (import.meta.env.VITE_API_BASE || (BASE ? BASE + '/api' : '/api')).replace(/\/+$/, '')
+}
 
 // 静态资源（图书文件 / 封面等）基础地址：由 API_BASE 去掉 /api 后缀得到
 // 例：API_BASE=https://host/api  ->  staticBase=https://host

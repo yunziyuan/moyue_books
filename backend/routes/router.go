@@ -7,7 +7,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"my-books/backend/config"
 	"my-books/backend/handlers"
@@ -15,9 +14,34 @@ import (
 	"my-books/backend/logger"
 	"my-books/backend/middleware"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
+
+// corsMiddleware 自定义 CORS：
+// - 反射 Origin 并带 Vary，兼容携带凭据的跨域；
+// - 返回 Access-Control-Allow-Private-Network: true，支持「私有网络访问(PNA)」，
+//   使移动端 WebView(http://localhost) 能跨私有 IP(如 192.168.x.x) 访问本地服务。
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if origin := c.GetHeader("Origin"); origin != "" {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		} else {
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, Access-Control-Request-Private-Network")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Content-Type")
+		c.Header("Access-Control-Allow-Private-Network", "true")
+		c.Header("Access-Control-Max-Age", "43200")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
 
 // SetupRouter 配置路由
 func SetupRouter() *gin.Engine {
@@ -30,15 +54,8 @@ func SetupRouter() *gin.Engine {
 	r.Use(middleware.AccessLog())
 	r.Use(gin.Recovery())
 
-	// CORS 配置
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	// CORS 配置（含私有网络访问 PNA，供移动端 WebView 跨私有 IP 访问）
+	r.Use(corsMiddleware())
 
 	// 同时兼容两种入口（同一份二进制、同一份前端构建都能用）：
 	//   1) 飞牛统一网关：请求经 /app/moyue 前缀由网关反代到 Unix Socket；

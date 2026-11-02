@@ -256,9 +256,9 @@ function onSeekClick(e) {
 }
 
 /* ===== 移动端适配 ===== */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .global-player {
-    bottom: 62px; /* 底部导航上方 */
+    bottom: calc(64px + env(safe-area-inset-bottom)); /* 底部 Tab 栏上方 */
   }
   /* 迷你条：还原完整功能（封面/标题/播放/下一段/播放列表/关闭），居中收窄更协调 */
   .gp-bar {

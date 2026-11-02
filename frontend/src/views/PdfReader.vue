@@ -299,6 +299,7 @@ import { markdownToText } from '@/utils/markdown'
 import { copyText } from '@/utils/clipboard'
 import { notifyProgressUpdate } from '@/utils/progressSync'
 import * as pdfjsLib from 'pdfjs-dist'
+import { nativeFetch } from '@/utils/nativeHttp'
 
 // 用 BASE_URL 拼接：兼容网关前缀（/app/moyue/pdf.worker.min.js）与 App file:// 相对加载
 pdfjsLib.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.js`
@@ -1301,7 +1302,7 @@ const doSaveProgress = (keepalive = false) => {
       const headers = { 'Content-Type': 'application/json' }
       const token = getToken()
       if (token) headers.Authorization = `Bearer ${token}`
-      fetch(`${API_BASE}/books/${props.id}/progress`, {
+      nativeFetch(`${API_BASE}/books/${props.id}/progress`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ progress, current_page: page, tts_location: ttsLoc }),

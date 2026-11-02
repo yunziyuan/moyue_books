@@ -97,6 +97,20 @@
 
     <!-- 全局有声书播放器（后台播放）；阅读器页不展示 -->
     <GlobalPlayer v-if="!isReader" />
+
+    <!-- 底部 Tab 栏（移动端主导航；阅读器页隐藏） -->
+    <nav v-if="!isReader" class="m-tabbar">
+      <div
+        v-for="tab in tabItems"
+        :key="tab.path"
+        class="m-tab"
+        :class="{ active: isNavActive(tab) }"
+        @click="navTo(tab.path)"
+      >
+        <el-icon :size="22"><component :is="tab.icon" /></el-icon>
+        <span class="m-tab-label">{{ tab.label }}</span>
+      </div>
+    </nav>
   </div>
 </template>
 
@@ -153,16 +167,20 @@ watch(
   }
 )
 
-// 全部分类（移动网页：汉堡抽屉列出，不占用底部空间）
-const menuItems = [
+// 底部 Tab 栏（移动端主导航，覆盖高频入口）
+const tabItems = [
   { path: '/bookshelf', label: '书架', icon: 'Reading' },
   { path: '/audiobooks', label: '有声书', icon: 'Headset' },
   { path: '/collections', label: '收藏夹', icon: 'Star' },
+  { path: '/settings', label: '我的', icon: 'Setting' }
+]
+
+// 汉堡抽屉：次级入口（高频入口已在底部 Tab 栏）
+const menuItems = [
   { path: '/categories', label: '分类管理', icon: 'FolderOpened' },
   { path: '/libraries', label: '媒体库', icon: 'Collection' },
   { path: '/stats', label: '阅读统计', icon: 'TrendCharts' },
-  { path: '/reviews', label: '读后感', icon: 'Notebook' },
-  { path: '/settings', label: '设置', icon: 'Setting' }
+  { path: '/reviews', label: '读后感', icon: 'Notebook' }
 ]
 
 const isNavActive = (item) => {
@@ -297,11 +315,13 @@ const scrollToTop = () => {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 14px 14px 20px;
+  /* 底部预留 Tab 栏 + 安全区高度 */
+  padding: 14px 14px calc(74px + env(safe-area-inset-bottom));
 }
 
 .m-main.is-reader {
-  padding: 0;
+  /* 阅读器全屏：顶部/底部均留出安全区，避免内容被刘海或 Home 指示条遮挡 */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   overflow: hidden;
 }
 
@@ -468,8 +488,8 @@ const scrollToTop = () => {
 .m-backtop {
   position: fixed;
   right: 16px;
-  bottom: calc(20px + env(safe-area-inset-bottom));
-  z-index: 25;
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  z-index: 45;
   width: 42px;
   height: 42px;
   border-radius: 50%;
@@ -486,6 +506,55 @@ const scrollToTop = () => {
 
 .m-backtop:active {
   transform: scale(0.9);
+}
+
+/* ===== 底部 Tab 栏 ===== */
+.m-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  height: calc(56px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid #eceff3;
+  box-shadow: 0 -2px 12px rgba(15, 23, 42, 0.06);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.m-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.15s ease;
+}
+
+.m-tab:active {
+  transform: scale(0.92);
+}
+
+.m-tab.active {
+  color: var(--app-primary);
+}
+
+.m-tab-label {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+}
+
+.m-tab.active .m-tab-label {
+  font-weight: 600;
 }
 
 /* ===== 动效 ===== */

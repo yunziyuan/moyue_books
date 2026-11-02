@@ -171,6 +171,7 @@ const props = defineProps({
 })
 import { getToken } from '@/api/auth'
 import { API_BASE } from '@/config'
+import { nativeFetch } from '@/utils/nativeHttp'
 import BookCard from '@/components/BookCard.vue'
 
 const router = useRouter()
@@ -294,7 +295,7 @@ const startScan = async () => {
   scanMessage.value = ''
 
   try {
-    const resp = await fetch(`${API_BASE}/books/scan`, {
+    const resp = await nativeFetch(`${API_BASE}/books/scan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

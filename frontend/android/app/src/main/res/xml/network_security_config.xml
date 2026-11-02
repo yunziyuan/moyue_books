@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 默认配置：允许明文(http)，并信任系统 CA 与用户自行安装的自签 CA。
+         这样飞牛远程地址即便使用自签证书，只要用户把该 CA 装进手机，APP 即可连接。 -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
