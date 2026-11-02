@@ -186,6 +186,9 @@
         v-model:page-size="pageSize"
         :total="filteredTasks.length"
         :page-sizes="pageSizesOptions"
+        :has-more="hasMoreTasks"
+        :loading-more="loadingMoreTasks"
+        @load-more="loadMoreTasks"
         @size-change="onSizeChange"
       />
     </div>
@@ -302,7 +305,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { audiobookApi } from '@/api/audiobook'
@@ -310,6 +313,7 @@ import { audiobookShareApi, getShareConfig } from '@/api/share'
 import { copyText } from '@/utils/clipboard'
 import { bookApi } from '@/api/book'
 import { useViewPagination } from '@/composables/useViewPagination'
+import { useIsMobile } from '@/composables/useMobileView'
 import ViewModeSwitch from '@/components/ViewModeSwitch.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import axios from 'axios'
@@ -355,11 +359,27 @@ const filteredTasks = computed(() => {
 // 分页（后端返回全部任务，前端切片）；书架风格：两行自动 + 倍数选项 + 按视图持久化 + 缩放重算
 const { viewMode, page, pageSize, pageSizesOptions, onSizeChange } =
   useViewPagination('audiobooks', () => {})
+// 手机端使用无限滚动（向上加载后续），按可见条数增量展示
+const { isMobile } = useIsMobile()
+const visibleCount = ref(pageSize.value)
 const pagedTasks = computed(() => {
+  if (isMobile.value) return filteredTasks.value.slice(0, visibleCount.value)
   const start = (page.value - 1) * pageSize.value
   return filteredTasks.value.slice(start, start + pageSize.value)
 })
-watch(activeFilter, () => { page.value = 1 })
+// 手机端无限滚动状态
+const loadingMoreTasks = ref(false)
+const hasMoreTasks = computed(() => visibleCount.value < filteredTasks.value.length)
+const loadMoreTasks = () => {
+  if (loadingMoreTasks.value || !hasMoreTasks.value) return
+  loadingMoreTasks.value = true
+  visibleCount.value += pageSize.value
+  nextTick(() => { loadingMoreTasks.value = false })
+}
+watch(activeFilter, () => {
+  page.value = 1
+  visibleCount.value = pageSize.value
+})
 
 function toggleFilter(key) {
   activeFilter.value = activeFilter.value === key ? 'all' : key
@@ -451,6 +471,7 @@ async function refresh(showLoading = true) {
   try {
     const res = await audiobookApi.list()
     tasks.value = res.data.data || []
+    visibleCount.value = pageSize.value
     recoverStaleBrowserTasks()
   } catch (e) {
     // 静默失败，轮询会再试

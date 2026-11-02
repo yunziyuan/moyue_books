@@ -94,6 +94,9 @@
               v-model:page-size="bookPageSize"
               :total="bookTotal"
               :page-sizes="bookPageSizes"
+              :has-more="hasMoreBooks"
+              :loading-more="loadingMoreBooks"
+              @load-more="loadMoreBooks"
               @current-change="loadBooks"
               @size-change="onBookSizeChange"
             />
@@ -267,22 +270,44 @@ const loadLib = async () => {
   }
 }
 
+const fetchLibraryBooks = async () =>
+  bookApi.listBooks({
+    library_id: libId.value,
+    page: bookPage.value,
+    page_size: bookPageSize.value,
+    sort: 'created_at',
+    order: 'desc'
+  })
+
 const loadBooks = async () => {
   booksLoading.value = true
   try {
-    const { data } = await bookApi.listBooks({
-      library_id: libId.value,
-      page: bookPage.value,
-      page_size: bookPageSize.value,
-      sort: 'created_at',
-      order: 'desc'
-    })
+    const { data } = await fetchLibraryBooks()
     books.value = data.data || []
     bookTotal.value = data.total || 0
   } catch (e) {
     ElMessage.error('加载图书失败')
   } finally {
     booksLoading.value = false
+  }
+}
+
+// 手机端无限滚动：加载下一页并追加
+const loadingMoreBooks = ref(false)
+const hasMoreBooks = computed(() => books.value.length < bookTotal.value)
+const loadMoreBooks = async () => {
+  if (loadingMoreBooks.value || !hasMoreBooks.value) return
+  loadingMoreBooks.value = true
+  try {
+    bookPage.value += 1
+    const { data } = await fetchLibraryBooks()
+    books.value = books.value.concat(data.data || [])
+    bookTotal.value = data.total || 0
+  } catch (e) {
+    ElMessage.error('加载更多图书失败')
+    bookPage.value -= 1
+  } finally {
+    loadingMoreBooks.value = false
   }
 }
 

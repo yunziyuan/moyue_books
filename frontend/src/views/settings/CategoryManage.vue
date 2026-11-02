@@ -272,6 +272,9 @@
         v-model:page-size="bookPageSize"
         :total="bookTotal"
         :page-sizes="pageSizesOptions"
+        :has-more="hasMoreBooks"
+        :loading-more="loadingMoreBooks"
+        @load-more="loadMoreBooks"
         @current-change="onBookPageChange"
         @size-change="onSizeChange"
       />
@@ -624,7 +627,7 @@ const collectCategoryNames = (node, acc = []) => {
 
 // 请求序号：确保并发的多次 loadNodeBooks 中，最后一次调用始终生效（避免旧的根节点/父级请求覆盖当前分类数据）
 let nodeBooksSeq = 0
-const loadNodeBooks = async (node, resetPage = false) => {
+const loadNodeBooks = async (node, { resetPage = false, append = false } = {}) => {
   if (!node) { nodeBooks.value = []; bookTotal.value = 0; return }
   if (resetPage) bookPage.value = 1
   const seq = ++nodeBooksSeq
@@ -636,18 +639,35 @@ const loadNodeBooks = async (node, resetPage = false) => {
       : { page: bookPage.value, page_size: bookPageSize.value }
     const res = await bookApi.listBooks(params)
     if (seq !== nodeBooksSeq) return // 已是过期请求，丢弃
-    nodeBooks.value = res.data.data || []
+    const list = res.data.data || []
+    nodeBooks.value = append ? nodeBooks.value.concat(list) : list
     bookTotal.value = res.data.total || 0
   } catch (e) {
     if (seq !== nodeBooksSeq) return
-    nodeBooks.value = []
-    bookTotal.value = 0
+    if (!append) { nodeBooks.value = []; bookTotal.value = 0 }
   } finally {
     if (seq === nodeBooksSeq) catBooksLoading.value = false
   }
 }
 const onBookPageChange = () => loadNodeBooks(currentNode.value)
-watch(currentNode, (n) => loadNodeBooks(n, true), { immediate: true })
+
+// 手机端无限滚动：加载下一页并追加
+const loadingMoreBooks = ref(false)
+const hasMoreBooks = computed(() => nodeBooks.value.length < bookTotal.value)
+const loadMoreBooks = async () => {
+  if (loadingMoreBooks.value || !hasMoreBooks.value) return
+  loadingMoreBooks.value = true
+  try {
+    bookPage.value += 1
+    await loadNodeBooks(currentNode.value, { append: true })
+  } catch (e) {
+    bookPage.value -= 1
+  } finally {
+    loadingMoreBooks.value = false
+  }
+}
+
+watch(currentNode, (n) => loadNodeBooks(n, { resetPage: true }), { immediate: true })
 
 const router = useRouter()
 

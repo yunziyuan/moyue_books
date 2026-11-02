@@ -302,6 +302,9 @@
         v-model:page-size="pageSize"
         :total="total"
         :page-sizes="pageSizesOptions"
+        :has-more="hasMoreBooks"
+        :loading-more="loadingMore"
+        @load-more="loadMoreBooks"
         @current-change="loadBooks"
         @size-change="onSizeChange"
       />
@@ -544,19 +547,20 @@ const formatDate = (dateStr) => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
+const buildBookParams = () => ({
+  page: page.value,
+  page_size: pageSize.value,
+  sort: sortBy.value,
+  order: 'desc',
+  q: route.query.q || '',
+  ...(activeCategory.value ? { category: activeCategory.value } : {}),
+  ...(activeStatus.value ? { status: activeStatus.value } : {})
+})
+
 const loadBooks = async () => {
   loading.value = true
   try {
-    const params = {
-      page: page.value,
-      page_size: pageSize.value,
-      sort: sortBy.value,
-      order: 'desc',
-      q: route.query.q || '',
-      ...(activeCategory.value ? { category: activeCategory.value } : {}),
-      ...(activeStatus.value ? { status: activeStatus.value } : {})
-    }
-    const { data } = await bookApi.listBooks(params)
+    const { data } = await bookApi.listBooks(buildBookParams())
     books.value = data.data || []
     total.value = data.total || 0
   } catch (e) {
@@ -564,6 +568,25 @@ const loadBooks = async () => {
     console.warn('加载图书列表失败', e)
   } finally {
     loading.value = false
+  }
+}
+
+// 手机端无限滚动：加载下一页并追加，不触发整页 loading 遮罩
+const loadingMore = ref(false)
+const hasMoreBooks = computed(() => books.value.length < total.value)
+const loadMoreBooks = async () => {
+  if (loadingMore.value || !hasMoreBooks.value) return
+  loadingMore.value = true
+  try {
+    page.value += 1
+    const { data } = await bookApi.listBooks(buildBookParams())
+    books.value = books.value.concat(data.data || [])
+    total.value = data.total || 0
+  } catch (e) {
+    console.warn('加载更多图书失败', e)
+    page.value -= 1
+  } finally {
+    loadingMore.value = false
   }
 }
 

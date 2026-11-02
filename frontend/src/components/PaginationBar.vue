@@ -12,41 +12,40 @@
     @size-change="(s) => emit('size-change', s)"
   />
 
-  <!-- 手机端：简洁分页（上一页 / 第 X / Y 页 / 下一页） -->
-  <div v-else class="mp-bar">
-    <el-button class="mp-btn" :disabled="current <= 1" @click="go(current - 1)">
-      <el-icon><ArrowLeft /></el-icon>
-      <span>上一页</span>
-    </el-button>
-    <span class="mp-info">第 {{ current }} / {{ maxPage }} 页</span>
-    <el-button
-      class="mp-btn"
-      type="primary"
-      :disabled="current >= maxPage"
-      @click="go(current + 1)"
-    >
-      <span>下一页</span>
-      <el-icon><ArrowRight /></el-icon>
-    </el-button>
+  <!-- 手机端：向上滚动加载后续（无限滚动），不使用按钮分页 -->
+  <div v-else class="mscroll">
+    <div ref="sentinel" class="mscroll-sentinel" />
+    <div v-if="loadingMore" class="mscroll-status">
+      <el-icon class="is-loading"><Loading /></el-icon>
+      <span>正在加载…</span>
+    </div>
+    <div v-else-if="!hasMore" class="mscroll-status mscroll-end">没有更多了</div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { Loading } from '@element-plus/icons-vue'
+import { useIsMobile } from '@/composables/useMobileView'
 
 const props = defineProps({
   currentPage: { type: Number, required: true },
   pageSize: { type: Number, required: true },
   total: { type: Number, required: true },
-  pageSizes: { type: Array, default: () => [10, 20, 50, 100] }
+  pageSizes: { type: Array, default: () => [10, 20, 50, 100] },
+  // 手机端无限滚动相关
+  hasMore: { type: Boolean, default: true },
+  loadingMore: { type: Boolean, default: false }
 })
 const emit = defineEmits([
   'update:currentPage',
   'update:pageSize',
   'current-change',
-  'size-change'
+  'size-change',
+  'load-more'
 ])
+
+const { isMobile } = useIsMobile()
 
 const current = computed({
   get: () => props.currentPage,
@@ -56,52 +55,88 @@ const size = computed({
   get: () => props.pageSize,
   set: (v) => emit('update:pageSize', v)
 })
-const maxPage = computed(() =>
-  Math.max(1, Math.ceil(props.total / Math.max(1, props.pageSize)))
-)
 
-const isMobile = ref(false)
-const checkMobile = () => { isMobile.value = window.innerWidth <= 768 }
-let resizeTimer = null
-const onResize = () => {
-  if (resizeTimer) clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(checkMobile, 150)
+// ===== 手机端无限滚动 =====
+const sentinel = ref(null)
+let observer = null
+
+const sentinelVisible = () => {
+  const el = sentinel.value
+  if (!el) return false
+  const r = el.getBoundingClientRect()
+  const vh = window.innerHeight || document.documentElement.clientHeight
+  return r.top <= vh + 300
 }
+
+const tryLoadMore = () => {
+  if (!isMobile.value) return
+  if (!props.hasMore || props.loadingMore) return
+  emit('load-more')
+}
+
+const setupObserver = () => {
+  if (observer) observer.disconnect()
+  if (!sentinel.value) return
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) tryLoadMore()
+    },
+    { rootMargin: '300px 0px' }
+  )
+  observer.observe(sentinel.value)
+}
+
+// 加载结束后若哨兵仍在视口内，继续加载直至填满屏幕
+watch(
+  () => props.loadingMore,
+  (now, prev) => {
+    if (prev && !now && isMobile.value && props.hasMore) {
+      nextTick(() => {
+        if (sentinelVisible()) emit('load-more')
+      })
+    }
+  }
+)
+// 数据变化（如筛选后内容变短，哨兵重新进入视口）时触发首次加载
+watch(
+  () => props.hasMore,
+  (v) => {
+    if (v && isMobile.value) nextTick(() => { if (sentinelVisible()) emit('load-more') })
+  }
+)
+watch(isMobile, (v) => {
+  if (v) nextTick(setupObserver)
+  else if (observer) observer.disconnect()
+})
+
 onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', onResize)
+  if (isMobile.value) nextTick(setupObserver)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize)
-  if (resizeTimer) clearTimeout(resizeTimer)
+  if (observer) observer.disconnect()
 })
-
-const go = (p) => {
-  const next = Math.min(Math.max(1, p), maxPage.value)
-  if (next === current.value) return
-  current.value = next
-  emit('current-change', next)
-}
 </script>
 
 <style scoped>
-.mp-bar {
+.mscroll {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
   width: 100%;
+  padding: 16px 0 8px;
 }
-.mp-info {
-  font-size: 14px;
-  font-weight: 600;
-  color: #475569;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+.mscroll-sentinel {
+  width: 100%;
+  height: 1px;
 }
-.mp-btn {
+.mscroll-status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.mscroll-end {
+  color: #cbd5e1;
 }
 </style>

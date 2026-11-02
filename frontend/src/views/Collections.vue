@@ -197,6 +197,9 @@
           v-model:page-size="pageSize"
           :total="total"
           :page-sizes="pageSizesOptions"
+          :has-more="hasMoreBooks"
+          :loading-more="loadingMore"
+          @load-more="loadMoreBooks"
           @current-change="loadDetailBooks"
           @size-change="onSizeChange"
         />
@@ -289,7 +292,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api/book'
@@ -341,13 +344,16 @@ const backToList = () => {
   loadCollections()
 }
 
+const fetchCollectionBooks = async () =>
+  bookApi.getCollection(currentCollection.value.id, {
+    page: page.value,
+    page_size: pageSize.value
+  })
+
 const loadDetailBooks = async () => {
   detailLoading.value = true
   try {
-    const { data } = await bookApi.getCollection(currentCollection.value.id, {
-      page: page.value,
-      page_size: pageSize.value
-    })
+    const { data } = await fetchCollectionBooks()
     books.value = data.data || []
     total.value = data.total || 0
   } catch (e) {
@@ -355,6 +361,25 @@ const loadDetailBooks = async () => {
     console.warn('加载收藏夹内图书失败', e)
   } finally {
     detailLoading.value = false
+  }
+}
+
+// 手机端无限滚动：加载下一页并追加
+const loadingMore = ref(false)
+const hasMoreBooks = computed(() => books.value.length < total.value)
+const loadMoreBooks = async () => {
+  if (loadingMore.value || !hasMoreBooks.value) return
+  loadingMore.value = true
+  try {
+    page.value += 1
+    const { data } = await fetchCollectionBooks()
+    books.value = books.value.concat(data.data || [])
+    total.value = data.total || 0
+  } catch (e) {
+    console.warn('加载更多图书失败', e)
+    page.value -= 1
+  } finally {
+    loadingMore.value = false
   }
 }
 

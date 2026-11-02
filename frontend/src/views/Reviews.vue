@@ -157,6 +157,9 @@
         v-model:page-size="pageSize"
         :total="total"
         :page-sizes="pageSizesOptions"
+        :has-more="hasMoreReviews"
+        :loading-more="loadingMoreReviews"
+        @load-more="loadMoreReviews"
         @size-change="onSizeChange"
       />
     </div>
@@ -230,7 +233,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -240,6 +243,7 @@ import {
 import { reviewApi } from '@/api/review'
 import { bookApi } from '@/api/book'
 import { useViewPagination } from '@/composables/useViewPagination'
+import { useIsMobile } from '@/composables/useMobileView'
 import { renderMarkdown } from '@/utils/markdown'
 import BookPickerDialog from '@/components/BookPickerDialog.vue'
 import ViewModeSwitch from '@/components/ViewModeSwitch.vue'
@@ -254,6 +258,9 @@ const statsAll = ref([])       // 全量读后感（用于统计，始终不受�
 // 书架风格分页（两行自动 + 倍数选项 + 按视图持久化 + 缩放重算）；前端切片分页无需重新请求
 const { viewMode, page, pageSize, pageSizesOptions, onSizeChange } =
   useViewPagination('reviews', () => {})
+// 手机端使用无限滚动（向上加载后续），按可见条数增量展示
+const { isMobile } = useIsMobile()
+const visibleCount = ref(pageSize.value)
 const keyword = ref('')
 const searchFocus = ref(false)
 
@@ -366,15 +373,28 @@ const filteredReviews = computed(() => {
 
 const total = computed(() => filteredReviews.value.length)
 
+// 手机端无限滚动：按可见条数增量展示；桌面端保持页码切片
 const pagedReviews = computed(() => {
+  if (isMobile.value) return filteredReviews.value.slice(0, visibleCount.value)
   const start = (page.value - 1) * pageSize.value
   return filteredReviews.value.slice(start, start + pageSize.value)
 })
+
+// 手机端无限滚动状态
+const loadingMoreReviews = ref(false)
+const hasMoreReviews = computed(() => visibleCount.value < filteredReviews.value.length)
+const loadMoreReviews = () => {
+  if (loadingMoreReviews.value || !hasMoreReviews.value) return
+  loadingMoreReviews.value = true
+  visibleCount.value += pageSize.value
+  nextTick(() => { loadingMoreReviews.value = false })
+}
 
 function setFilter(filter) {
   if (filter === null || filter === activeFilter.value) return
   activeFilter.value = filter
   page.value = 1
+  visibleCount.value = pageSize.value
 }
 
 async function fetchList(q) {
@@ -408,6 +428,7 @@ async function loadReviews() {
       applyStats(statsAll.value)
     }
     page.value = 1
+    visibleCount.value = pageSize.value
   } catch (e) {
     reviews.value = []
     if (!keyword.value.trim()) statsAll.value = []
