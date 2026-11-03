@@ -45,9 +45,10 @@ import Feedback from './settings/Feedback.vue'
 import OpenSource from './settings/OpenSource.vue'
 import ReleaseNotes from './settings/ReleaseNotes.vue'
 import ServerSettings from './settings/ServerSettings.vue'
+import { isAndroidNative } from '@/utils/platform'
 
 // ===== 设置分类注册表：后续新增设置功能时，只需在此追加一项 =====
-const sections = [
+const allSections = [
   {
     key: 'appearance',
     label: '外观设置',
@@ -99,14 +100,21 @@ const sections = [
   }
 ]
 
+// 「服务器地址」仅安卓原生端展示（远程客户端需配置飞牛服务器）；
+// 移动网页 / PC 网页由服务器同源托管，不暴露该配置。
+const sections = computed(() =>
+  isAndroidNative ? allSections : allSections.filter((s) => s.key !== 'server')
+)
+
 const route = useRoute()
 const router = useRouter()
 
 const activeTab = ref('appearance')
 
 const activeComp = computed(() => {
-  const s = sections.find((x) => x.key === activeTab.value)
-  return s ? s.component : sections[0].component
+  const list = sections.value
+  const s = list.find((x) => x.key === activeTab.value)
+  return s ? s.component : list[0].component
 })
 
 const switchTab = (key) => {
@@ -117,7 +125,7 @@ const switchTab = (key) => {
 // 支持 ?tab=xxx 深链接定位到对应设置分类
 const syncFromRoute = () => {
   const t = route.query.tab
-  if (t && sections.some((s) => s.key === t)) {
+  if (t && sections.value.some((s) => s.key === t)) {
     activeTab.value = t
   }
 }

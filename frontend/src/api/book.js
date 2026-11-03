@@ -1,6 +1,8 @@
 import axios from 'axios'
+import { Capacitor } from '@capacitor/core'
 import { getToken } from './auth'
 import { API_BASE, staticBase } from '@/config'
+import { nativeUpload } from '@/utils/nativeHttp'
 
 // 拼接鉴权 query 参数：<img>/<iframe> 无法携带 Authorization 头，需通过 ?token= 完成鉴权
 function withToken(url) {
@@ -8,6 +10,23 @@ function withToken(url) {
   if (!token) return url
   const sep = url.includes('?') ? '&' : '?'
   return `${url}${sep}token=${encodeURIComponent(token)}`
+}
+
+// 上传统一入口：原生平台走 HttpPlugin 的 multipart 上传（绕开 WebView 的 PNA 拦截），
+// 其余平台走 axios（浏览器/桌面同源无此限制）。非 2xx 时与 axios 一致抛出错误。
+async function doUpload(url, formData) {
+  if (Capacitor.isNativePlatform()) {
+    const res = await nativeUpload(url, formData, { Authorization: `Bearer ${getToken()}` })
+    if (!res || res.status < 200 || res.status >= 300) {
+      const err = new Error('上传失败')
+      err.response = { status: res?.status || 0, data: res?.data }
+      throw err
+    }
+    return { data: res.data }
+  }
+  return axios.post(url, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
 }
 
 export const bookApi = {
@@ -70,9 +89,7 @@ export const bookApi = {
     const formData = new FormData()
     formData.append('file', file)
     if (category) formData.append('category', category)
-    return axios.post(`${API_BASE}/books`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return doUpload(`${API_BASE}/books`, formData)
   },
 
   // 批量上传
@@ -80,18 +97,14 @@ export const bookApi = {
     const formData = new FormData()
     files.forEach(f => formData.append('files', f))
     if (category) formData.append('category', category)
-    return axios.post(`${API_BASE}/books/batch`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return doUpload(`${API_BASE}/books/batch`, formData)
   },
 
   // 上传封面
   uploadCover(id, file) {
     const formData = new FormData()
     formData.append('cover', file)
-    return axios.post(`${API_BASE}/books/${id}/cover`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return doUpload(`${API_BASE}/books/${id}/cover`, formData)
   },
 
   // 更新进度（ttsLocation 为朗读断点 JSON 字符串，可省略）

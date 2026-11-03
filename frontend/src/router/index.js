@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from '@/api/auth'
 import { getServerUrl } from '@/utils/serverConfig'
+import { isAndroidNative } from '@/utils/platform'
 import Bookshelf from '@/views/Bookshelf.vue'
 import ReaderEntry from '@/views/ReaderEntry.vue'
 import Upload from '@/views/Upload.vue'
@@ -51,8 +52,15 @@ const router = createRouter({
 router.beforeEach((to) => {
   const token = getToken()
   const server = getServerUrl()
-  // 未配置服务器地址（移动端远程客户端），且当前不是设置页 / 公开页 → 引导去设置
-  if (!server && !to.meta.public && !to.meta.setup) {
+  // 服务器连接配置页（/server-setup）仅安卓原生端使用；网页端不暴露该能力，
+  // 直接访问时回首页，避免网页端出现「填写飞牛服务器地址」这类远程客户端专属界面。
+  if (to.meta.setup && !isAndroidNative) {
+    return { path: '/' }
+  }
+  // 未配置服务器地址（安卓远程客户端），且当前不是设置页 / 公开页 → 引导去设置。
+  // 仅安卓端需要此引导：移动网页 / PC 网页由服务器同源托管，按网关前缀或同源 /api 访问，
+  // 无需用户填写服务器地址，故不强制跳转。
+  if (isAndroidNative && !server && !to.meta.public && !to.meta.setup) {
     return { path: '/server-setup' }
   }
   if (!to.meta.public && !token) {

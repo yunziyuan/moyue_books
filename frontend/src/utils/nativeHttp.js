@@ -125,3 +125,54 @@ export function capacitorAxiosAdapter(config) {
       throw error
     })
 }
+
+// 将 File/Blob 转为 base64（去掉 data:...;base64, 前缀），用于原生 multipart 上传
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result || ''
+      const idx = result.indexOf(',')
+      resolve(idx >= 0 ? result.slice(idx + 1) : result)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+// 原生层 multipart/form-data 上传，绕开 WebView 对跨私有网络请求的 PNA 拦截。
+// 读取 FormData：文本字段 -> fields，File/Blob -> base64 后经 HttpPlugin.upload 发送。
+// 仅原生平台可用；非原生环境返回 null，由调用方回退到 axios。
+// 注意：文件内容以 base64 经 JS<->原生桥传输，适合常规体积（封面/普通书籍）；
+// 超大文件（接近上限）受序列化内存限制，建议走服务端扫描导入。
+export async function nativeUpload(url, formData, headers = {}) {
+  if (!isNative || !HttpPlugin) return null
+
+  const fields = {}
+  const files = []
+  for (const [name, value] of formData.entries()) {
+    if (value instanceof File || value instanceof Blob) {
+      const b64 = await blobToBase64(value)
+      files.push({
+        field: name,
+        filename: value.name || 'file',
+        contentType: value.type || 'application/octet-stream',
+        data: b64
+      })
+    } else {
+      fields[name] = value == null ? '' : String(value)
+    }
+  }
+
+  const hdr = {}
+  for (const [k, v] of Object.entries(headers)) {
+    if (v != null) hdr[k] = String(v)
+  }
+
+  const res = await HttpPlugin.upload({ url, headers: hdr, fields, files })
+  let data = res.data
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data) } catch { /* 保留原始字符串 */ }
+  }
+  return { status: res.status, data, headers: res.headers || {} }
+}

@@ -142,9 +142,14 @@ async function onConnect() {
     clearToken()
     setUser(null)
     ok.value = `已连接${info?.app_name ? '：' + info.app_name : ''}，正在进入…`
-    // 整页重载并直接落到登录页：保证 API_BASE 按新地址重建，且不再停留在设置页
+    // 必须真正整页重载：仅修改 hash（如 location.replace('#/login')）不会重载页面，
+    // config.js 中一次性算好的 API_BASE 不会按新地址重建，登录请求会打到本地 WebView 而非后端。
+    // 先落地登录页 hash，再 reload 让 API_BASE 以新服务器地址重新计算。
     setTimeout(() => {
-      window.location.replace(`${import.meta.env.BASE_URL}#/login`)
+      if (!window.location.hash.startsWith('#/login')) {
+        window.location.hash = '#/login'
+      }
+      window.location.reload()
     }, 600)
   } catch (e) {
     if (e?.name === 'AbortError') {

@@ -106,6 +106,7 @@ import { ElMessage } from 'element-plus'
 import { getUser, clearToken, setUser } from '@/api/auth'
 import { loadAppPrefs, isCustomIcon } from '@/utils/appPrefs'
 import { APP_VERSION } from '@/utils/version'
+import { isAndroidNative } from '@/utils/platform'
 import GlobalPlayer from '@/components/GlobalPlayer.vue'
 import { pausePlay } from '@/player'
 
@@ -160,13 +161,18 @@ const tabItems = [
 ]
 
 // 汉堡抽屉：次级入口（高频入口已在底部 Tab 栏）
-const menuItems = [
+// 「服务器地址」仅安卓原生端展示；移动网页端不暴露该远程客户端配置
+const baseMenuItems = [
   { path: '/categories', label: '分类管理', icon: 'FolderOpened' },
   { path: '/libraries', label: '媒体库', icon: 'Collection' },
   { path: '/stats', label: '阅读统计', icon: 'TrendCharts' },
-  { path: '/reviews', label: '读后感', icon: 'Notebook' },
-  { path: '/settings?tab=server', label: '服务器地址', icon: 'Connection' }
+  { path: '/reviews', label: '读后感', icon: 'Notebook' }
 ]
+const menuItems = computed(() =>
+  isAndroidNative
+    ? [...baseMenuItems, { path: '/settings?tab=server', label: '服务器地址', icon: 'Connection' }]
+    : baseMenuItems
+)
 
 const isNavActive = (item) => {
   const [base, q] = item.path.split('?')
