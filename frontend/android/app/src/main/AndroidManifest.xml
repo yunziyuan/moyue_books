@@ -27,18 +27,23 @@
 
         </activity>
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
+        <!-- 有声书后台播放：原生 MediaPlayer + MediaSession，Activity 退到后台后仍可继续发声。
+             exported=false 只允许本应用启动；targetSdk 34+ 的媒体前台服务必须声明该类型。 -->
+        <service
+            android:name=".AudioPlayerService"
             android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
-        </provider>
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 
-    <!-- Permissions -->
-
+    <!-- Permissions：仅申请实际用到的权限，全部为普通权限，安装即授予、不弹窗、不影响 APK 安装。
+         INTERNET                          访问书架服务器
+         WAKE_LOCK                          后台播放期间保持 CPU（由 MediaPlayer 持有）
+         FOREGROUND_SERVICE                 前台服务（Android 8+）
+         FOREGROUND_SERVICE_MEDIA_PLAYBACK 媒体类前台服务（Android 14+ 强制要求）
+         刻意不申请 POST_NOTIFICATIONS：Android 13+ 未授予通知权限时前台服务仍可正常后台播放，
+         通知会由系统「前台服务任务管理器」展示；这样可避免运行时权限弹窗。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 </manifest>

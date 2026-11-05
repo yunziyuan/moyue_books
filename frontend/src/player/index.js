@@ -5,6 +5,7 @@ import { reactive, computed } from 'vue'
 import { audiobookApi } from '@/api/audiobook'
 import { bookApi } from '@/api/book'
 import { ElMessage } from 'element-plus'
+import { createAudioElement, isNativeAudio } from './nativeAudio'
 
 // ===== 播放状态（全局单例） =====
 export const playerState = reactive({
@@ -53,7 +54,8 @@ export const formatDuration = (sec) => {
 // ===== 音频元素（全局单例，首次 import 即创建，不播放不触发自动播放限制） =====
 function ensureAudio() {
   if (audio) return
-  audio = new Audio()
+  // 安卓端用原生 MediaPlayer（前台服务），其余平台仍用 HTMLAudioElement
+  audio = createAudioElement()
   audio.preload = 'auto'
   audio.addEventListener('timeupdate', onTimeUpdate)
   audio.addEventListener('ended', onEnded)
@@ -69,6 +71,12 @@ function ensureAudio() {
   audio.addEventListener('loadedmetadata', () => {
     playerState.duration = audio.duration || 0
   })
+  if (isNativeAudio) {
+    // 通知栏 / 锁屏 / 耳机媒体键的指令由原生 MediaSession 转发，统一走既有播放逻辑
+    audio.addEventListener('remoteNext', playNext)
+    audio.addEventListener('remotePrev', playPrev)
+    audio.addEventListener('remoteToggle', togglePlay)
+  }
 }
 ensureAudio()
 
@@ -220,9 +228,15 @@ function autoJumpToDone() {
 }
 
 function nextTickPlay() {
-  requestAnimationFrame(() => {
-    if (audio) audio.play().catch(() => {})
-  })
+  const idx = playerState.index
+  if (idx < 0) return
+  // 首次播放 / 等待续播时 audio 还没有音源，只调 play() 不会发声，必须设置当前段的 src。
+  // 安卓原生端不用 rAF：切到后台后 rAF 会被暂停，导致后台自动续播卡住。
+  if (isNativeAudio) {
+    setSrcAndPlay(idx, 0)
+    return
+  }
+  requestAnimationFrame(() => setSrcAndPlay(idx, 0))
 }
 
 export function playSegment(idx) {
@@ -308,10 +322,12 @@ function onEnded() {
   updateMediaSession()
 }
 
-function onError() {
+function onError(e) {
   playerState.playing = false
   updateMediaSession()
-  ElMessage.warning('音频播放失败，可能尚未生成完成')
+  // 原生播放器会把失败原因（网络、鉴权、解码）带回来，便于定位真实问题
+  const msg = e && e.detail && e.detail.message
+  ElMessage.warning(msg || '音频播放失败，可能尚未生成完成')
 }
 
 function onTimeUpdate() {
@@ -403,6 +419,18 @@ function mediaArtwork() {
 
 // 同步锁屏/系统面板：元数据 + 播放状态 + 控制动作
 export function updateMediaSession() {
+  // 安卓端由原生 MediaSession 接管锁屏 / 系统媒体面板，避免 WebView 的
+  // navigator.mediaSession 与原生会话互相抢占；这里只同步书名与段名到通知栏。
+  if (isNativeAudio) {
+    const nativeTask = playerState.task
+    if (!nativeTask || !audio || typeof audio.setMetadata !== 'function') return
+    const nativeSeg = playerState.segments[playerState.index]
+    audio.setMetadata({
+      title: nativeTask.book_title || '有声书',
+      subtitle: nativeSeg ? (nativeSeg.title || '第 ' + nativeSeg.index + ' 段') : '我的书架',
+    })
+    return
+  }
   if (!mediaSession) return
   const task = playerState.task
   try {
@@ -432,6 +460,8 @@ export function updateMediaSession() {
 
 // 清除锁屏/系统面板（播放器关闭时）
 export function clearMediaSession() {
+  // 原生端 stopPlayer() 已通过 audio.load() 向服务发出停止指令
+  if (isNativeAudio) return
   if (!mediaSession) return
   try {
     mediaSession.playbackState = 'none'

@@ -4,4 +4,7 @@
     <string name="title_activity_main">我的书架</string>
     <string name="package_name">com.moyue.app</string>
     <string name="custom_url_scheme">com.moyue.app</string>
+    <string name="audio_channel_name">有声书播放</string>
+    <string name="audio_channel_desc">后台播放有声书</string>
+    <string name="press_back_again_to_exit">再按一次返回桌面</string>
 </resources>

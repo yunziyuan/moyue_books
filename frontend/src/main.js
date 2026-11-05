@@ -14,6 +14,7 @@ import router from './router'
 import { getToken, clearToken, setUser } from './api/auth'
 import { applyAppPrefs } from './utils/appPrefs'
 import { installNativeImageLoader } from '@/utils/nativeImage'
+import { installEdgeSwipe } from '@/utils/edgeSwipe'
 
 // axios 全局拦截器：自动携带 token，401 时跳转登录页
 axios.interceptors.request.use((config) => {
@@ -50,6 +51,9 @@ applyAppPrefs()
 
 // 安卓端：封面 / EPUB 插图等跨源图片改由原生 HTTP 通道取回，绕开 WebView 的混合内容与 PNA 拦截
 installNativeImageLoader()
+
+// 安卓端：左右边缘滑动导航（左→右回退 / 右→左前进），仅原生端启用，Web 端行为不变
+installEdgeSwipe()
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
