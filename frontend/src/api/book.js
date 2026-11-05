@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { getToken } from './auth'
 import { API_BASE, staticBase } from '@/config'
 import { nativeUpload } from '@/utils/nativeHttp'
+import { refreshNativeImages } from '@/utils/nativeImage'
 
 // 拼接鉴权 query 参数：<img>/<iframe> 无法携带 Authorization 头，需通过 ?token= 完成鉴权
 function withToken(url) {
@@ -104,7 +105,11 @@ export const bookApi = {
   uploadCover(id, file) {
     const formData = new FormData()
     formData.append('cover', file)
-    return doUpload(`${API_BASE}/books/${id}/cover`, formData)
+    const req = doUpload(`${API_BASE}/books/${id}/cover`, formData)
+    // 安卓端封面是原生取回转 data URL 的，上传成功后需让已渲染的 <img> 重新取图
+    return Capacitor.isNativePlatform()
+      ? req.then((res) => { refreshNativeImages(); return res })
+      : req
   },
 
   // 更新进度（ttsLocation 为朗读断点 JSON 字符串，可省略）

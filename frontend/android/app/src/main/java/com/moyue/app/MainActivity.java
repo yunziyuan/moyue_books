@@ -28,7 +28,9 @@ public class MainActivity extends BridgeActivity {
         Bridge bridge = getBridge();
         if (bridge != null) {
             WebView webView = bridge.getWebView();
-            webView.setWebViewClient(new ProxyWebViewClient(bridge));
+            // 用 Bridge.setWebViewClient 同步更新 Bridge 内部持有的 client，
+            // 否则 getWebViewClient() 仍指向旧对象，插件/本地服务可能绕过代理。
+            bridge.setWebViewClient(new ProxyWebViewClient(bridge));
             WebSettings settings = webView.getSettings();
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             settings.setAllowFileAccess(true);

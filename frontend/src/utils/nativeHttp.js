@@ -7,6 +7,11 @@ const HttpPlugin = isNative ? registerPlugin('HttpPlugin') : null
 // 原生层(Java HttpURLConnection)发请求，完全绕开 WebView 的 CORS/PNA 限制。
 // web/桌面环境同源无此限制，仍走原生 fetch/axios。
 
+// 供图片加载等场景复用的原生请求入口（共用同一个 HttpPlugin 代理，避免重复 registerPlugin）
+export function nativeRequest(options) {
+  return HttpPlugin.request(options)
+}
+
 function base64ToBytes(b64) {
   const bin = atob(b64)
   const len = bin.length

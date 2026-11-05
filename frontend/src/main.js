@@ -13,6 +13,7 @@ import App from './App.vue'
 import router from './router'
 import { getToken, clearToken, setUser } from './api/auth'
 import { applyAppPrefs } from './utils/appPrefs'
+import { installNativeImageLoader } from '@/utils/nativeImage'
 
 // axios 全局拦截器：自动携带 token，401 时跳转登录页
 axios.interceptors.request.use((config) => {
@@ -46,6 +47,9 @@ const app = createApp(App)
 
 // 启动时应用全局外观配置（主题色 / 网站名称 / 网站图标 / 动效开关）
 applyAppPrefs()
+
+// 安卓端：封面 / EPUB 插图等跨源图片改由原生 HTTP 通道取回，绕开 WebView 的混合内容与 PNA 拦截
+installNativeImageLoader()
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

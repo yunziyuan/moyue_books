@@ -2,6 +2,7 @@ package com.moyue.app;
 
 import android.annotation.TargetApi;
 import android.os.Build;
+import android.util.Log;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -31,6 +32,8 @@ import java.util.Map;
  * bridge 消息、POST 上传等）一律交给 super 处理，不影响 Capacitor 既有行为。
  */
 public class ProxyWebViewClient extends BridgeWebViewClient {
+
+    private static final String TAG = "MoyueProxy";
 
     public ProxyWebViewClient(Bridge bridge) {
         super(bridge);
@@ -113,6 +116,8 @@ public class ProxyWebViewClient extends BridgeWebViewClient {
             }
 
             int status = conn.getResponseCode();
+            // WebResourceResponse 只接受 100~599，非法状态码会让构造抛异常、整个拦截失效
+            if (status < 100 || status > 599) status = 502;
             InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
             byte[] body = readAll(in);
 
@@ -150,6 +155,10 @@ public class ProxyWebViewClient extends BridgeWebViewClient {
             respHeaders.put("Access-Control-Allow-Origin", "*");
 
             String reason = conn.getResponseMessage();
+            // reasonPhrase 为 null / 空白时 Android 会抛异常，导致图片加载失败
+            if (reason == null || reason.trim().isEmpty()) {
+                reason = (status >= 200 && status < 300) ? "OK" : "Error";
+            }
             conn.disconnect();
             return new WebResourceResponse(
                     mime,
@@ -160,6 +169,7 @@ public class ProxyWebViewClient extends BridgeWebViewClient {
                     new ByteArrayInputStream(body));
         } catch (IOException | RuntimeException e) {
             // 代理失败则放弃，交由 super（请求会按原生策略失败），不影响其它资源
+            Log.w(TAG, "代理子资源失败: " + url, e);
             return null;
         }
     }
