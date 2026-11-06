@@ -121,15 +121,6 @@
       </el-button>
     </div>
 
-    <!-- 指定书籍到书架提示 -->
-    <div v-if="isSelectedShelf" class="filter-tip shelf-mode-tip">
-      <span class="filter-tip-ic"><el-icon :size="14"><Collection /></el-icon></span>
-      <span class="filter-tip-text">当前为「指定书籍到书架」，书架只显示已添加的图书，可在分类管理中调整</span>
-      <span class="filter-tip-count">共 {{ total }} 本</span>
-      <el-button size="small" text type="primary" class="filter-tip-clear" @click="goCategories">去添加书籍</el-button>
-      <el-button size="small" text class="filter-tip-clear" @click="goReadingPrefs">更改习惯</el-button>
-    </div>
-
     <!-- 加载中 -->
     <div v-if="loading" class="loading">
       <div class="skeleton-grid">
