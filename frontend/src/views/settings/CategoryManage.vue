@@ -574,21 +574,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api/book'
 import { useViewPagination } from '@/composables/useViewPagination'
 import { useIsMobile } from '@/composables/useMobileView'
-import { loadShelfMode, onShelfModeChange, SHELF_MODE_SELECTED } from '@/utils/readerPrefs'
+import { shelfMode, ensureShelfModeLoaded, SHELF_MODE_SELECTED } from '@/utils/shelfPrefs'
 import BaseDialog from '@/components/BaseDialog.vue'
 import BookCard from '@/components/BookCard.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 
-// 书架使用习惯：仅「指定书籍到书架」模式下显示加入书架入口
-const shelfMode = ref(loadShelfMode())
+// 书架使用习惯（账号级，多端一致）：仅「指定书籍到书架」模式下显示加入书架入口
 const isSelectedShelf = computed(() => shelfMode.value === SHELF_MODE_SELECTED)
-let stopShelfModeWatch = null
 
 const loading = ref(false)
 const saving = ref(false)
@@ -1124,10 +1122,8 @@ const toggleShelfBook = async (book) => {
 
 onMounted(() => {
   loadCategories()
-  stopShelfModeWatch = onShelfModeChange((mode) => { shelfMode.value = mode })
+  ensureShelfModeLoaded()
 })
-
-onUnmounted(() => stopShelfModeWatch?.())
 </script>
 
 <style scoped>

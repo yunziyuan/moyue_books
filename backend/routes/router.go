@@ -230,10 +230,9 @@ func registerAPI(r *gin.Engine, prefix string) {
 			// 统计（基础）
 			authed.GET("/stats", handlers.GetStats)
 
-			// 设置
-			authed.GET("/settings", func(c *gin.Context) {
-				c.JSON(200, gin.H{"message": "settings"})
-			})
+			// 账号级设置（存 Setting 表，多端共享）
+			authed.GET("/settings", handlers.GetUserSettings)
+			authed.PUT("/settings", handlers.UpdateUserSettings)
 
 			// 问题反馈（QQ / 邮件）：163 SMTP 账号与授权码内置于后端源码，
 			// 使用者仅填写反馈内容与联系方式，提交后自动发送至开发者邮箱

@@ -112,7 +112,7 @@
           v-for="m in shelfModes"
           :key="m.key"
           class="shelf-card"
-          :class="{ active: shelfMode === m.key }"
+          :class="{ active: shelfMode === m.key, disabled: shelfSaving }"
           @click="changeShelfMode(m.key)"
         >
           <div class="shelf-card-head">
@@ -125,7 +125,7 @@
       </div>
       <div v-if="shelfMode === SHELF_MODE_SELECTED" class="shelf-tip">
         <el-icon :size="16"><InfoFilled /></el-icon>
-        <span>书架只显示已添加的书籍。请到「分类管理」中挑选书籍加入书架，新导入的图书同样需要手动添加。</span>
+        <span>该习惯会同步到当前账号的所有设备。书架只显示已添加的书籍，请到「分类管理」中挑选，新导入的图书同样需要手动添加。</span>
         <el-button size="small" text type="primary" @click="goCategories">去分类管理</el-button>
       </div>
     </div>
@@ -137,23 +137,25 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { RefreshLeft } from '@element-plus/icons-vue'
+import { loadReaderPrefs, saveReaderPrefs, resetReaderPrefs } from '@/utils/readerPrefs'
 import {
-  loadReaderPrefs,
-  saveReaderPrefs,
-  resetReaderPrefs,
-  loadShelfMode,
+  shelfMode as sharedShelfMode,
+  ensureShelfModeLoaded,
   saveShelfMode,
   SHELF_MODE_ALL,
   SHELF_MODE_SELECTED
-} from '@/utils/readerPrefs'
+} from '@/utils/shelfPrefs'
 
 const router = useRouter()
 const prefs = ref(loadReaderPrefs())
-const shelfMode = ref(loadShelfMode())
+// 账号级偏好：各页面共享同一状态，保存到服务端后多端一致
+const shelfMode = computed(() => sharedShelfMode.value)
+const shelfSaving = ref(false)
+onMounted(ensureShelfModeLoaded)
 
 const shelfModes = [
   {
@@ -170,11 +172,17 @@ const shelfModes = [
   }
 ]
 
-const changeShelfMode = (mode) => {
-  if (shelfMode.value === mode) return
-  shelfMode.value = saveShelfMode(mode)
-  prefs.value = { ...prefs.value, shelfMode: shelfMode.value }
-  ElMessage.success(mode === SHELF_MODE_SELECTED ? '已切换为「指定书籍到书架」' : '已切换为「显示全部书籍」')
+const changeShelfMode = async (mode) => {
+  if (shelfMode.value === mode || shelfSaving.value) return
+  shelfSaving.value = true
+  try {
+    await saveShelfMode(mode)
+    ElMessage.success(mode === SHELF_MODE_SELECTED ? '已切换为「指定书籍到书架」，所有设备同步生效' : '已切换为「显示全部书籍」，所有设备同步生效')
+  } catch (e) {
+    ElMessage.error('保存书架习惯失败，请检查网络后重试')
+  } finally {
+    shelfSaving.value = false
+  }
 }
 
 const goCategories = () => router.push('/categories')
@@ -221,11 +229,15 @@ const setPref = (key, value) => {
   saveReaderPrefs({ [key]: value })
 }
 
-const resetAll = () => {
+const resetAll = async () => {
   prefs.value = resetReaderPrefs()
   saveReaderPrefs(prefs.value)
-  shelfMode.value = saveShelfMode(SHELF_MODE_ALL)
-  ElMessage.success('已恢复默认阅读设置')
+  try {
+    await saveShelfMode(SHELF_MODE_ALL)
+    ElMessage.success('已恢复默认设置')
+  } catch (e) {
+    ElMessage.warning('阅读设置已恢复，但书架习惯同步失败，请重试')
+  }
 }
 </script>
 
@@ -338,6 +350,10 @@ const resetAll = () => {
 .shelf-card.active {
   border-color: var(--el-color-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-primary) 15%, transparent);
+}
+.shelf-card.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 .shelf-card-head {
   display: flex;

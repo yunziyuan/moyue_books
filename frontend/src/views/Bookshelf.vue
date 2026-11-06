@@ -430,15 +430,13 @@ import { getShareConfig, shareApi } from '@/api/share'
 import { copyText } from '@/utils/clipboard'
 import BookCard from '@/components/BookCard.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
-import { loadShelfMode, onShelfModeChange, SHELF_MODE_SELECTED } from '@/utils/readerPrefs'
+import { shelfMode, ensureShelfModeLoaded, SHELF_MODE_SELECTED } from '@/utils/shelfPrefs'
 
 const route = useRoute()
 const router = useRouter()
 
-// 书架使用习惯：selected 模式下只显示已加入书架的图书
-const shelfMode = ref(loadShelfMode())
+// 书架使用习惯（账号级，多端一致）：selected 模式下只显示已加入书架的图书
 const isSelectedShelf = computed(() => shelfMode.value === SHELF_MODE_SELECTED)
-let stopShelfModeWatch = null
 
 const books = ref([])
 const loading = ref(false)
@@ -571,17 +569,22 @@ const buildBookParams = () => ({
   ...(isSelectedShelf.value ? { shelf: 'selected' } : {})
 })
 
+// 请求序号：账号级偏好同步回来时可能紧接着触发第二次加载，只保留最后一次响应
+let booksSeq = 0
 const loadBooks = async () => {
+  const seq = ++booksSeq
   loading.value = true
   try {
     const { data } = await bookApi.listBooks(buildBookParams())
+    if (seq !== booksSeq) return
     books.value = data.data || []
     total.value = data.total || 0
   } catch (e) {
+    if (seq !== booksSeq) return
     // 列表加载失败不弹错误提醒（空数据/网络抖动属正常情况），静默降级为空列表
     console.warn('加载图书列表失败', e)
   } finally {
-    loading.value = false
+    if (seq === booksSeq) loading.value = false
   }
 }
 
@@ -590,13 +593,16 @@ const loadingMore = ref(false)
 const hasMoreBooks = computed(() => books.value.length < total.value)
 const loadMoreBooks = async () => {
   if (loadingMore.value || !hasMoreBooks.value) return
+  const seq = ++booksSeq
   loadingMore.value = true
   try {
     page.value += 1
     const { data } = await bookApi.listBooks(buildBookParams())
+    if (seq !== booksSeq) return
     books.value = books.value.concat(data.data || [])
     total.value = data.total || 0
   } catch (e) {
+    if (seq !== booksSeq) return
     console.warn('加载更多图书失败', e)
     page.value -= 1
   } finally {
@@ -769,7 +775,6 @@ const removeFromShelf = async (id) => {
 }
 
 const goCategories = () => router.push('/categories')
-const goReadingPrefs = () => router.push({ path: '/settings', query: { tab: 'reading' } })
 
 const downloadBook = async (id) => {
   try {
@@ -891,6 +896,8 @@ watch(viewMode, (v) => {
   loadBooks()
 })
 watch(sortBy, () => { page.value = 1; loadBooks() })
+// 账号级书架习惯变化（本页保存、其它标签页或其它设备同步）后重新拉取列表
+watch(isSelectedShelf, () => { page.value = 1; loadBooks() })
 watch(() => route.query.q, (val) => {
   searchQuery.value = val || ''
   page.value = 1
@@ -902,19 +909,13 @@ onMounted(() => {
   loadStats()
   loadCategories()
   window.addEventListener('resize', onResize)
-  // 偏好可能在设置页或其它标签页被修改，需即时刷新书架
-  stopShelfModeWatch = onShelfModeChange((mode) => {
-    if (shelfMode.value === mode) return
-    shelfMode.value = mode
-    page.value = 1
-    loadBooks()
-  })
+  // 拉取账号级偏好；若与其它端不一致，watch(isSelectedShelf) 会自动重载列表
+  ensureShelfModeLoaded()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   if (resizeTimer) clearTimeout(resizeTimer)
-  stopShelfModeWatch?.()
 })
 </script>
 
