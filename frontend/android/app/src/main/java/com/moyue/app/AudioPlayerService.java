@@ -457,8 +457,8 @@ public class AudioPlayerService extends Service {
         if (mSession == null) return;
         MediaMetadata.Builder builder = new MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, mTitle.isEmpty() ? "有声书" : mTitle)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, mSubtitle.isEmpty() ? "我的书架" : mSubtitle)
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, "我的书架 · 有声书");
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, mSubtitle.isEmpty() ? "墨阅" : mSubtitle)
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, "墨阅 · 有声书");
         if (mDuration > 0) builder.putLong(MediaMetadata.METADATA_KEY_DURATION, (long) (mDuration * 1000));
         mSession.setMetadata(builder.build());
     }
@@ -481,7 +481,7 @@ public class AudioPlayerService extends Service {
                 : new Notification.Builder(this);
         builder.setSmallIcon(R.drawable.ic_stat_audio)
                 .setContentTitle(mTitle.isEmpty() ? "有声书" : mTitle)
-                .setContentText(mSubtitle.isEmpty() ? "我的书架" : mSubtitle)
+                .setContentText(mSubtitle.isEmpty() ? "墨阅" : mSubtitle)
                 .setContentIntent(PendingIntent.getActivity(this, 1,
                         new Intent(this, MainActivity.class), pendingFlags()))
                 .setOnlyAlertOnce(true)

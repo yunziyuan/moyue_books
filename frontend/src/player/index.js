@@ -427,7 +427,7 @@ export function updateMediaSession() {
     const nativeSeg = playerState.segments[playerState.index]
     audio.setMetadata({
       title: nativeTask.book_title || '有声书',
-      subtitle: nativeSeg ? (nativeSeg.title || '第 ' + nativeSeg.index + ' 段') : '我的书架',
+      subtitle: nativeSeg ? (nativeSeg.title || '第 ' + nativeSeg.index + ' 段') : '墨阅',
     })
     return
   }
