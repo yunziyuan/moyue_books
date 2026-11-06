@@ -135,6 +135,8 @@ func registerAPI(r *gin.Engine, prefix string) {
 				books.POST("/scan", handlers.ScanFolder)
 				books.GET("/:id/toc", handlers.GetBookTOC)
 				books.GET("/:id", handlers.GetBook)
+				// 书架使用习惯：批量加入 / 移出书架（静态路由需注册在 /:id 之前）
+				books.PUT("/shelf", handlers.SetBooksShelf)
 				books.PUT("/:id", handlers.UpdateBook)
 				books.DELETE("/:id", handlers.DeleteBook)
 				books.GET("/:id/file", handlers.ServeBookFile)

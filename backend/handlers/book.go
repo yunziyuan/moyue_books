@@ -59,6 +59,11 @@ func ListBooks(c *gin.Context) {
 		query = query.Where("library_id = ?", lid)
 	}
 
+	// 书架使用习惯：shelf=selected 时仅显示已指定到书架的图书，默认显示全部
+	if c.Query("shelf") == "selected" {
+		query = query.Where("in_shelf = ?", true)
+	}
+
 	// 按阅读状态筛选（配合书架统计块点击）
 	switch c.Query("status") {
 	case "reading":
@@ -192,6 +197,32 @@ func UpdateBook(c *gin.Context) {
 
 	config.DB.Model(&book).Updates(updates)
 	c.JSON(http.StatusOK, book)
+}
+
+// SetBooksShelf 批量将图书加入 / 移出书架（「指定书籍到书架」习惯使用）
+func SetBooksShelf(c *gin.Context) {
+	var input struct {
+		BookIDs []uint `json:"book_ids"`
+		InShelf *bool  `json:"in_shelf"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(input.BookIDs) == 0 || input.InShelf == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "book_ids 与 in_shelf 不能为空"})
+		return
+	}
+
+	// 按 user_id 限定，避免越权修改其他用户的图书
+	res := config.DB.Model(&models.Book{}).
+		Where("user_id = ? AND id IN ?", middleware.CurrentUserID(c), input.BookIDs).
+		Update("in_shelf", *input.InShelf)
+	if res.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": res.Error.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok", "affected": res.RowsAffected})
 }
 
 // ListCategories 获取图书分类及数量（合并自建分类表与图书聚合，空分类也会返回）

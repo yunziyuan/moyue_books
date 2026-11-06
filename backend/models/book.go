@@ -24,6 +24,8 @@ type Book struct {
 	ISBN        string         `json:"isbn" gorm:"size:64;index"`
 	Tags        string         `json:"tags" gorm:"type:text"`
 	Category    string         `json:"category" gorm:"size:128;index"`
+	// 书架使用习惯：仅在「指定书籍到书架」模式下生效，标记该图书是否显示在书架
+	InShelf     bool           `json:"in_shelf" gorm:"default:false;index"`
 	Series      string         `json:"series" gorm:"size:256"`
 	SeriesIndex float64        `json:"series_index"`
 	// 媒体库来源：LibraryID 非空表示该图书来自某个媒体库，FilePath 指向源文件原始路径（不迁移）。

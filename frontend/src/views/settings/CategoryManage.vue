@@ -203,6 +203,16 @@
       <div class="section-head">
         <span class="section-bar"></span>
         <h3 class="section-title">图书 · {{ bookTotal }}</h3>
+        <el-button
+          v-if="isSelectedShelf"
+          size="small"
+          type="primary"
+          plain
+          class="shelf-manage-btn"
+          @click="openShelfBooks"
+        >
+          <el-icon><Collection /></el-icon> 批量加入书架
+        </el-button>
       </div>
 
       <!-- 网格视图 -->
@@ -221,6 +231,17 @@
             <template #actions>
               <el-button size="small" circle class="action-btn remove-btn" @click="removeBookFromCategory(book)">
                 <el-icon><Close /></el-icon>
+              </el-button>
+              <el-button
+                v-if="isSelectedShelf"
+                size="small"
+                circle
+                class="action-btn shelf-btn"
+                :type="book.in_shelf ? 'success' : ''"
+                :title="book.in_shelf ? '移出书架' : '加入书架'"
+                @click="toggleShelfBook(book)"
+              >
+                <el-icon><component :is="book.in_shelf ? 'CircleCheck' : 'Plus'" /></el-icon>
               </el-button>
               <el-button
                 v-if="isReadable(book)"
@@ -260,6 +281,9 @@
               @click="goRead(book.id)"
             >阅读</el-button>
             <el-button size="small" class="action-btn" @click="removeBookFromCategory(book)">移出</el-button>
+            <el-button v-if="isSelectedShelf" size="small" class="action-btn" @click="toggleShelfBook(book)">
+              {{ book.in_shelf ? '移出书架' : '加入书架' }}
+            </el-button>
           </div>
         </div>
       </div>
@@ -499,19 +523,72 @@
         <el-button type="danger" :loading="saving" @click="submitRemoveBooks">移除</el-button>
       </template>
     </BaseDialog>
+
+    <!-- 批量管理书架书籍（指定书籍到书架） -->
+    <BaseDialog v-model="shelfBooksVisible" title="添加书籍到书架" icon="Collection" width="520px">
+      <p class="add-books-target">
+        范围：<b>{{ currentNode ? currentNode.name : '全部' }}</b>，勾选的图书将显示在书架上（最多 100 本）
+      </p>
+      <div class="add-search">
+        <el-input
+          v-model="shelfBookQuery"
+          placeholder="搜索书名…"
+          clearable
+          size="large"
+          class="search-input"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <span class="add-count">已选 {{ shelfForm.bookIds.length }}</span>
+      </div>
+      <div v-if="filteredShelfBooks.length === 0" class="add-empty">
+        <el-icon :size="28"><Document /></el-icon>
+        <span>{{ shelfBookQuery ? '没有匹配的图书' : '当前范围暂无图书' }}</span>
+      </div>
+      <div v-else class="add-list">
+        <div
+          v-for="b in filteredShelfBooks"
+          :key="b.id"
+          class="add-item"
+          :class="{ selected: shelfForm.bookIds.includes(b.id) }"
+          @click="toggleShelfSelect(b.id)"
+        >
+          <div class="add-cover-wrap">
+            <img :src="bookApi.coverUrl(b.id)" class="add-cover" alt="" loading="lazy" @error="onCoverError" />
+            <span v-if="shelfForm.bookIds.includes(b.id)" class="add-badge"><el-icon><Check /></el-icon></span>
+          </div>
+          <div class="add-info">
+            <div class="add-title" :title="b.title">{{ b.title }}</div>
+            <div class="add-sub">{{ formatAuthors(b.authors) }}</div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="shelfBooksVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" class="gradient-btn" @click="submitShelfBooks">保存</el-button>
+      </template>
+    </BaseDialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api/book'
 import { useViewPagination } from '@/composables/useViewPagination'
 import { useIsMobile } from '@/composables/useMobileView'
+import { loadShelfMode, onShelfModeChange, SHELF_MODE_SELECTED } from '@/utils/readerPrefs'
 import BaseDialog from '@/components/BaseDialog.vue'
 import BookCard from '@/components/BookCard.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+
+// 书架使用习惯：仅「指定书籍到书架」模式下显示加入书架入口
+const shelfMode = ref(loadShelfMode())
+const isSelectedShelf = computed(() => shelfMode.value === SHELF_MODE_SELECTED)
+let stopShelfModeWatch = null
 
 const loading = ref(false)
 const saving = ref(false)
@@ -974,7 +1051,83 @@ const submitRemoveBooks = async () => {
   }
 }
 
-onMounted(loadCategories)
+// ===== 指定书籍到书架 =====
+const shelfBooksVisible = ref(false)
+const shelfBookQuery = ref('')
+const shelfForm = ref({ candidates: [], bookIds: [], original: [] })
+
+const filteredShelfBooks = computed(() => {
+  const q = shelfBookQuery.value.trim().toLowerCase()
+  const list = shelfForm.value.candidates
+  if (!q) return list
+  return list.filter((b) => (b.title || '').toLowerCase().includes(q))
+})
+
+// 打开弹窗时拉取当前分类（含子分类）下的图书，已加入书架的默认勾选
+const openShelfBooks = async () => {
+  shelfBookQuery.value = ''
+  const params = { page_size: 100 }
+  const node = currentNode.value
+  if (node && node.realCategory) params.category = collectCategoryNames(node).join(',')
+  try {
+    const res = await bookApi.listBooks(params)
+    const list = res.data.data || []
+    const inShelf = list.filter((b) => b.in_shelf).map((b) => b.id)
+    shelfForm.value = { candidates: list, bookIds: [...inShelf], original: inShelf }
+  } catch (e) {
+    shelfForm.value = { candidates: [], bookIds: [], original: [] }
+  }
+  shelfBooksVisible.value = true
+}
+
+const toggleShelfSelect = (id) => {
+  const arr = shelfForm.value.bookIds
+  const idx = arr.indexOf(id)
+  if (idx >= 0) arr.splice(idx, 1)
+  else arr.push(id)
+}
+
+const submitShelfBooks = async () => {
+  const selected = shelfForm.value.bookIds
+  const original = shelfForm.value.original
+  const toAdd = selected.filter((id) => !original.includes(id))
+  const toRemove = original.filter((id) => !selected.includes(id))
+  if (toAdd.length === 0 && toRemove.length === 0) {
+    shelfBooksVisible.value = false
+    return
+  }
+  saving.value = true
+  try {
+    if (toAdd.length) await bookApi.setBooksShelf(toAdd, true)
+    if (toRemove.length) await bookApi.setBooksShelf(toRemove, false)
+    ElMessage.success('书架已更新')
+    shelfBooksVisible.value = false
+    refreshCurrentBooks()
+  } catch (e) {
+    ElMessage.error('更新书架失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+// 单本快捷加入 / 移出书架
+const toggleShelfBook = async (book) => {
+  const next = !book.in_shelf
+  try {
+    await bookApi.setBooksShelf([book.id], next)
+    book.in_shelf = next
+    ElMessage.success(next ? '已加入书架' : '已移出书架')
+  } catch (e) {
+    ElMessage.error('操作失败')
+  }
+}
+
+onMounted(() => {
+  loadCategories()
+  stopShelfModeWatch = onShelfModeChange((mode) => { shelfMode.value = mode })
+})
+
+onUnmounted(() => stopShelfModeWatch?.())
 </script>
 
 <style scoped>
@@ -1521,6 +1674,9 @@ onMounted(loadCategories)
   align-items: center;
   gap: 10px;
   margin: 22px 0 16px;
+}
+.shelf-manage-btn {
+  margin-left: auto;
 }
 .section-bar {
   width: 4px;

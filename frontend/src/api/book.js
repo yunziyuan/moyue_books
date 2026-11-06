@@ -75,6 +75,11 @@ export const bookApi = {
     })
   },
 
+  // 批量将图书加入 / 移出书架（「指定书籍到书架」习惯）
+  setBooksShelf(bookIds, inShelf) {
+    return axios.put(`${API_BASE}/books/shelf`, { book_ids: bookIds, in_shelf: inShelf })
+  },
+
   // 更新图书
   updateBook(id, data) {
     return axios.put(`${API_BASE}/books/${id}`, data)

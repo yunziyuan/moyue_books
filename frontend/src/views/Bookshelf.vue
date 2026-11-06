@@ -121,6 +121,15 @@
       </el-button>
     </div>
 
+    <!-- 指定书籍到书架提示 -->
+    <div v-if="isSelectedShelf" class="filter-tip shelf-mode-tip">
+      <span class="filter-tip-ic"><el-icon :size="14"><Collection /></el-icon></span>
+      <span class="filter-tip-text">当前为「指定书籍到书架」，书架只显示已添加的图书，可在分类管理中调整</span>
+      <span class="filter-tip-count">共 {{ total }} 本</span>
+      <el-button size="small" text type="primary" class="filter-tip-clear" @click="goCategories">去添加书籍</el-button>
+      <el-button size="small" text class="filter-tip-clear" @click="goReadingPrefs">更改习惯</el-button>
+    </div>
+
     <!-- 加载中 -->
     <div v-if="loading" class="loading">
       <div class="skeleton-grid">
@@ -141,6 +150,11 @@
         <h3>没有符合条件的图书</h3>
         <p>{{ activeStatus === 'reading' ? '当前没有「正在阅读」的图书，读完一本书后会自动归入该筛选' : '当前还没有「已读完」的图书，读完后会自动归入该筛选' }}</p>
         <el-button type="primary" size="large" round @click="setStatus('')">查看全部图书</el-button>
+      </template>
+      <template v-else-if="isSelectedShelf">
+        <h3>书架还没有书籍</h3>
+        <p>前往「分类管理」，把想看的书籍添加到书架</p>
+        <el-button type="primary" size="large" round @click="goCategories">去添加书籍到书架</el-button>
       </template>
       <template v-else>
         <h3>书架空空如也</h3>
@@ -203,6 +217,7 @@
                       生成有声书
                     </el-dropdown-item>
                     <el-dropdown-item @click="editBook(book)">编辑</el-dropdown-item>
+                    <el-dropdown-item v-if="isSelectedShelf" @click="removeFromShelf(book.id)">移出书架</el-dropdown-item>
                     <el-dropdown-item divided @click="deleteBook(book.id)" style="color: #f56c6c">
                       删除
                     </el-dropdown-item>
@@ -283,6 +298,7 @@
                     </el-dropdown-item>
                     <el-dropdown-item @click="downloadBook(row.id)">下载</el-dropdown-item>
                     <el-dropdown-item @click="editBook(row)">编辑</el-dropdown-item>
+                    <el-dropdown-item v-if="isSelectedShelf" @click="removeFromShelf(row.id)">移出书架</el-dropdown-item>
                     <el-dropdown-item divided @click="deleteBook(row.id)" style="color: #f56c6c">
                       删除
                     </el-dropdown-item>
@@ -423,9 +439,15 @@ import { getShareConfig, shareApi } from '@/api/share'
 import { copyText } from '@/utils/clipboard'
 import BookCard from '@/components/BookCard.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+import { loadShelfMode, onShelfModeChange, SHELF_MODE_SELECTED } from '@/utils/readerPrefs'
 
 const route = useRoute()
 const router = useRouter()
+
+// 书架使用习惯：selected 模式下只显示已加入书架的图书
+const shelfMode = ref(loadShelfMode())
+const isSelectedShelf = computed(() => shelfMode.value === SHELF_MODE_SELECTED)
+let stopShelfModeWatch = null
 
 const books = ref([])
 const loading = ref(false)
@@ -489,8 +511,8 @@ const setStatus = (status) => {
 
 const statCards = computed(() => [
   {
-    label: '藏书总数',
-    value: displayedStats.total_books,
+    label: isSelectedShelf.value ? '书架图书' : '藏书总数',
+    value: isSelectedShelf.value ? total.value : displayedStats.total_books,
     icon: 'Collection',
     gradient: 'linear-gradient(135deg,var(--app-primary),#8b5cf6)',
     glow: 'rgba(99,102,241,0.45)',
@@ -554,7 +576,8 @@ const buildBookParams = () => ({
   order: 'desc',
   q: route.query.q || '',
   ...(activeCategory.value ? { category: activeCategory.value } : {}),
-  ...(activeStatus.value ? { status: activeStatus.value } : {})
+  ...(activeStatus.value ? { status: activeStatus.value } : {}),
+  ...(isSelectedShelf.value ? { shelf: 'selected' } : {})
 })
 
 const loadBooks = async () => {
@@ -743,6 +766,20 @@ const deleteBook = async (id) => {
   }
 }
 
+// 指定模式下把图书移出书架（书籍本身不会删除）
+const removeFromShelf = async (id) => {
+  try {
+    await bookApi.setBooksShelf([id], false)
+    ElMessage.success('已移出书架')
+    loadBooks()
+  } catch (e) {
+    ElMessage.error(extractError(e))
+  }
+}
+
+const goCategories = () => router.push('/categories')
+const goReadingPrefs = () => router.push({ path: '/settings', query: { tab: 'reading' } })
+
 const downloadBook = async (id) => {
   try {
     const { data, headers } = await bookApi.downloadBook(id)
@@ -874,11 +911,19 @@ onMounted(() => {
   loadStats()
   loadCategories()
   window.addEventListener('resize', onResize)
+  // 偏好可能在设置页或其它标签页被修改，需即时刷新书架
+  stopShelfModeWatch = onShelfModeChange((mode) => {
+    if (shelfMode.value === mode) return
+    shelfMode.value = mode
+    page.value = 1
+    loadBooks()
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   if (resizeTimer) clearTimeout(resizeTimer)
+  stopShelfModeWatch?.()
 })
 </script>
 

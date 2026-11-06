@@ -102,6 +102,34 @@
       </el-select>
     </div>
 
+    <!-- 书架使用习惯 -->
+    <div class="pref-group">
+      <div class="pref-label">
+        <span>书架使用习惯</span>
+      </div>
+      <div class="shelf-cards">
+        <div
+          v-for="m in shelfModes"
+          :key="m.key"
+          class="shelf-card"
+          :class="{ active: shelfMode === m.key }"
+          @click="changeShelfMode(m.key)"
+        >
+          <div class="shelf-card-head">
+            <el-icon class="shelf-icon"><component :is="m.icon" /></el-icon>
+            <el-icon v-if="shelfMode === m.key" class="shelf-check"><Check /></el-icon>
+          </div>
+          <div class="shelf-name">{{ m.label }}</div>
+          <div class="shelf-desc">{{ m.desc }}</div>
+        </div>
+      </div>
+      <div v-if="shelfMode === SHELF_MODE_SELECTED" class="shelf-tip">
+        <el-icon :size="16"><InfoFilled /></el-icon>
+        <span>书架只显示已添加的书籍。请到「分类管理」中挑选书籍加入书架，新导入的图书同样需要手动添加。</span>
+        <el-button size="small" text type="primary" @click="goCategories">去分类管理</el-button>
+      </div>
+    </div>
+
     <div class="pref-actions">
       <el-button :icon="RefreshLeft" @click="resetAll">恢复默认设置</el-button>
     </div>
@@ -110,11 +138,46 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { RefreshLeft } from '@element-plus/icons-vue'
-import { loadReaderPrefs, saveReaderPrefs, resetReaderPrefs } from '@/utils/readerPrefs'
+import {
+  loadReaderPrefs,
+  saveReaderPrefs,
+  resetReaderPrefs,
+  loadShelfMode,
+  saveShelfMode,
+  SHELF_MODE_ALL,
+  SHELF_MODE_SELECTED
+} from '@/utils/readerPrefs'
 
+const router = useRouter()
 const prefs = ref(loadReaderPrefs())
+const shelfMode = ref(loadShelfMode())
+
+const shelfModes = [
+  {
+    key: SHELF_MODE_ALL,
+    icon: 'Collection',
+    label: '显示全部书籍',
+    desc: '书架展示账号内的全部图书，保持原有使用方式（默认）'
+  },
+  {
+    key: SHELF_MODE_SELECTED,
+    icon: 'CircleCheck',
+    label: '指定书籍到书架',
+    desc: '只展示从分类中挑选并加入书架的图书'
+  }
+]
+
+const changeShelfMode = (mode) => {
+  if (shelfMode.value === mode) return
+  shelfMode.value = saveShelfMode(mode)
+  prefs.value = { ...prefs.value, shelfMode: shelfMode.value }
+  ElMessage.success(mode === SHELF_MODE_SELECTED ? '已切换为「指定书籍到书架」' : '已切换为「显示全部书籍」')
+}
+
+const goCategories = () => router.push('/categories')
 
 const themeList = [
   {
@@ -154,12 +217,14 @@ const fontOptions = [
 
 const setPref = (key, value) => {
   prefs.value = { ...prefs.value, [key]: value }
-  saveReaderPrefs(prefs.value)
+  // 只提交变化的字段，避免用页面快照覆盖其它偏好
+  saveReaderPrefs({ [key]: value })
 }
 
 const resetAll = () => {
   prefs.value = resetReaderPrefs()
   saveReaderPrefs(prefs.value)
+  shelfMode.value = saveShelfMode(SHELF_MODE_ALL)
   ElMessage.success('已恢复默认阅读设置')
 }
 </script>
@@ -254,6 +319,72 @@ const resetAll = () => {
   font-size: 15px;
 }
 
+/* 书架使用习惯 */
+.shelf-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.shelf-card {
+  cursor: pointer;
+  padding: 14px 16px;
+  border: 2px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+.shelf-card:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+.shelf-card.active {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-primary) 15%, transparent);
+}
+.shelf-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.shelf-icon {
+  font-size: 20px;
+  color: var(--el-color-primary);
+}
+.shelf-check {
+  color: var(--el-color-primary);
+}
+.shelf-name {
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.shelf-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+.shelf-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+.shelf-tip > .el-icon {
+  flex-shrink: 0;
+  color: var(--el-color-primary);
+}
+.shelf-tip > span {
+  flex: 1;
+}
+.shelf-tip .el-button {
+  flex-shrink: 0;
+}
+
 .pref-actions {
   margin-top: 8px;
   padding-top: 16px;
@@ -263,6 +394,9 @@ const resetAll = () => {
 @media (max-width: 768px) {
   .theme-cards {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .shelf-cards {
+    grid-template-columns: 1fr;
   }
 }
 </style>
