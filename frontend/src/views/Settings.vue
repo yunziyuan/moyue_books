@@ -45,6 +45,7 @@ import Feedback from './settings/Feedback.vue'
 import OpenSource from './settings/OpenSource.vue'
 import ReleaseNotes from './settings/ReleaseNotes.vue'
 import ServerSettings from './settings/ServerSettings.vue'
+import DataCleanup from './settings/DataCleanup.vue'
 import { isAndroidNative } from '@/utils/platform'
 
 // ===== 设置分类注册表：后续新增设置功能时，只需在此追加一项 =====
@@ -97,6 +98,13 @@ const allSections = [
     desc: '连接 · 飞牛 · 重配',
     icon: 'Connection',
     component: markRaw(ServerSettings)
+  },
+  {
+    key: 'cleanup',
+    label: '数据清理',
+    desc: '去重 · 无效数据',
+    icon: 'Delete',
+    component: markRaw(DataCleanup)
   }
 ]
 

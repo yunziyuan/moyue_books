@@ -234,6 +234,9 @@ func registerAPI(r *gin.Engine, prefix string) {
 			authed.GET("/settings", handlers.GetUserSettings)
 			authed.PUT("/settings", handlers.UpdateUserSettings)
 
+			// 数据维护（一键去重复书架及无效数据）
+			authed.POST("/maintenance/cleanup", handlers.CleanupData)
+
 			// 问题反馈（QQ / 邮件）：163 SMTP 账号与授权码内置于后端源码，
 			// 使用者仅填写反馈内容与联系方式，提交后自动发送至开发者邮箱
 			feedback := authed.Group("/feedback")
