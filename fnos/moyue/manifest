@@ -33,4 +33,4 @@ ctl_stop              = true
 desktop_uidir         = ui
 desktop_applaunchname = moyue.Application
 # 更新日志（升级时同步更新，应用中心展示）
-changelog             = 1.0.4: 1. 优化移动端显示及分页获取。2. 新增安卓端apk应用 3.新增书架使用习惯
+changelog             = 1.0.4: 1. 优化移动端显示及分页获取 2. 新增安卓端apk应用 3.新增书架使用习惯 4.新增重复书籍检测与清理功能
