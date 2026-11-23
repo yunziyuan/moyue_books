@@ -32,7 +32,7 @@ type SegmentInfo struct {
 	Index      int    `json:"index"`   // 1-based
 	Title      string `json:"title"`   // 章节标题/页码区间
 	File       string `json:"file"`    // 音频文件名（segment_0001.mp3）
-	Text       string `json:"text"`    // 文本摘要（前 120 字），用于展示
+	Text       string `json:"text"`    // 完整朗读文本，前端按此切分显示字幕
 	CharCount  int    `json:"char_count"`
 	Duration   int    `json:"duration"` // 估算时长（秒）
 	Done       bool   `json:"done"`     // 是否已生成

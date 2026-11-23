@@ -1,33 +1,49 @@
 <template>
   <div v-if="playerState.task" class="global-player">
-    <!-- 底部迷你播放条（音乐播放器模式） -->
+    <!-- 底部迷你播放条（音乐播放器模式，字幕内嵌在播放条上方） -->
     <div class="gp-bar" :class="{ open: playerState.panelVisible }" @click="openPanel">
-      <div class="gp-cover" :style="{ background: coverGradient }">{{ coverText }}</div>
-      <div class="gp-info">
-        <div class="gp-title">
-          {{ playerState.task.book_title }}
-          <span v-if="playerState.waitingNext" class="gp-waiting">续播中…</span>
+      <div
+        v-if="playerState.subtitleEnabled && currentCue"
+        class="gp-bar-subtitle"
+        :title="currentCue.text"
+      >
+        <span class="gp-bar-subtitle-tag">字幕</span>
+        <span class="gp-bar-subtitle-text">{{ currentCue.text }}</span>
+      </div>
+      <div class="gp-bar-main">
+        <div class="gp-cover" :style="{ background: coverGradient }">{{ coverText }}</div>
+        <div class="gp-info">
+          <div class="gp-title">
+            {{ playerState.task.book_title }}
+            <span v-if="playerState.waitingNext" class="gp-waiting">续播中…</span>
+          </div>
+          <div class="gp-sub">{{ currentSegTitle }}</div>
         </div>
-        <div class="gp-sub">{{ currentSegTitle }}</div>
-      </div>
-      <div class="gp-progress" @click.stop="onSeekClick">
-        <div class="gp-pbar"><div class="gp-fill" :style="{ width: progressWidth + '%' }"></div></div>
-      </div>
-      <div class="gp-time">{{ currentTimeStr }} / {{ durationStr }}</div>
-      <div class="gp-actions" @click.stop>
-        <button class="gp-ctrl" title="播放/暂停" @click="togglePlay">
-          <el-icon :size="20"><component :is="playerState.playing ? 'VideoPause' : 'VideoPlay'" /></el-icon>
-        </button>
-        <button class="gp-ctrl" title="下一段" @click="playNext">
-          <el-icon :size="18"><Right /></el-icon>
-        </button>
-        <button class="gp-expand" @click="openPanel">
-          <el-icon :size="16"><ArrowUp /></el-icon>
-          <span>播放列表</span>
-        </button>
-        <button class="gp-close" title="关闭播放器" @click="stopPlayer">
-          <el-icon :size="16"><Close /></el-icon>
-        </button>
+        <div class="gp-progress" @click.stop="onSeekClick">
+          <div class="gp-pbar"><div class="gp-fill" :style="{ width: progressWidth + '%' }"></div></div>
+        </div>
+        <div class="gp-time">{{ currentTimeStr }} / {{ durationStr }}</div>
+        <div class="gp-actions" @click.stop>
+          <button class="gp-ctrl" title="播放/暂停" @click="togglePlay">
+            <el-icon :size="20"><component :is="playerState.playing ? 'VideoPause' : 'VideoPlay'" /></el-icon>
+          </button>
+          <button class="gp-ctrl" title="下一段" @click="playNext">
+            <el-icon :size="18"><Right /></el-icon>
+          </button>
+          <button
+            class="gp-ctrl gp-subtitle-toggle"
+            :class="{ active: playerState.subtitleEnabled }"
+            :title="playerState.subtitleEnabled ? '关闭字幕' : '开启字幕'"
+            @click="toggleSubtitle"
+          >字幕</button>
+          <button class="gp-expand" @click="openPanel">
+            <el-icon :size="16"><ArrowUp /></el-icon>
+            <span>播放列表</span>
+          </button>
+          <button class="gp-close" title="关闭播放器" @click="stopPlayer">
+            <el-icon :size="16"><Close /></el-icon>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -42,7 +58,12 @@
         :cover-gradient="coverGradient"
         :is-generating="isGen"
         :waiting-next="playerState.waitingNext"
+        :subtitle-cues="subtitleCues"
+        :subtitle-index="currentCueIndex"
+        :subtitle-enabled="playerState.subtitleEnabled"
         @play-segment="playSegment"
+        @seek-cue="seekTo"
+        @toggle-subtitle="toggleSubtitle"
         @close="closePanel"
       />
     </transition>
@@ -57,10 +78,15 @@ import {
   progressWidth,
   currentTimeStr,
   durationStr,
+  subtitleCues,
+  currentCueIndex,
+  currentCue,
   togglePlay,
   playNext,
   playSegment,
   seekByClick,
+  seekTo,
+  toggleSubtitle,
   closePanel,
   stopPlayer,
 } from '@/player'
@@ -105,15 +131,25 @@ function onSeekClick(e) {
   pointer-events: auto;
 }
 
-/* ===== 迷你播放条 ===== */
+.gp-ctrl.gp-subtitle-toggle {
+  width: auto;
+  padding: 0 7px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.gp-ctrl.gp-subtitle-toggle.active,
+.gp-ctrl.gp-subtitle-toggle:hover {
+  color: var(--app-primary, #6366f1);
+  background: #eef2ff;
+}
+
+/* ===== 迷你播放条（含内嵌字幕行） ===== */
 .gp-bar {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 58px;
+  flex-direction: column;
   margin: 0 auto 14px;
   width: min(760px, calc(100% - 24px));
-  padding: 0 14px;
+  padding: 8px 14px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(14px);
@@ -130,6 +166,41 @@ function onSeekClick(e) {
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
+}
+.gp-bar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+}
+.gp-bar-subtitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 7px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.12);
+}
+.gp-bar-subtitle-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--app-primary, #6366f1);
+  background: #eef2ff;
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.gp-bar-subtitle-text {
+  flex: 1;
+  min-width: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .gp-cover {
@@ -265,11 +336,20 @@ function onSeekClick(e) {
     width: calc(100% - 24px);
     max-width: 420px;
     margin: 0 auto 8px;
-    gap: 8px;
-    padding: 0 10px;
-    height: 54px;
+    padding: 6px 10px;
     border-radius: 14px;
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+  }
+  .gp-bar-main {
+    gap: 8px;
+    min-height: 42px;
+  }
+  .gp-bar-subtitle {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+  }
+  .gp-bar-subtitle-text {
+    font-size: 12px;
   }
   .gp-cover {
     width: 36px;

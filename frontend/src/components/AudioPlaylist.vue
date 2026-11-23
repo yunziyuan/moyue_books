@@ -12,13 +12,33 @@
             <span v-else-if="partial" class="gp-partial">部分生成 · 已生成 {{ doneCount }}/{{ segments.length }} 段</span>
           </div>
         </div>
+        <button
+          class="gpp-subs-switch"
+          :class="{ active: subtitleEnabled }"
+          :title="subtitleEnabled ? '关闭字幕' : '开启字幕'"
+          @click="$emit('toggle-subtitle')"
+        >字幕</button>
         <button class="gpp-close" @click="$emit('close')">
           <el-icon :size="18"><Close /></el-icon>
         </button>
       </div>
 
       <div class="gpp-tip">
-        <el-icon :size="14"><InfoFilled /></el-icon>点击下方分段播放 / 暂停，拖动底部播放条可精确控制进度
+        <el-icon :size="14"><InfoFilled /></el-icon>点击下方分段播放 / 暂停，点击字幕行可跳转到对应位置
+      </div>
+
+      <!-- 当前句及前后句字幕，随播放位置滚动；点击任意一句跳转 -->
+      <div v-if="subtitleEnabled && visibleCues.length" class="gpp-subs">
+        <div
+          v-for="cue in visibleCues"
+          :key="cue.i"
+          class="gpp-sub-line"
+          :class="{ active: cue.i === subtitleIndex }"
+          @click="$emit('seek-cue', cue.start)"
+        >
+          <span class="gpp-sub-time">{{ formatDuration(cue.start) }}</span>
+          <span class="gpp-sub-text">{{ cue.text }}</span>
+        </div>
       </div>
 
       <div class="gpp-list">
@@ -61,13 +81,25 @@ const props = defineProps({
   coverGradient: { type: String, default: '' },     // 封面渐变背景
   isGenerating: { type: Boolean, default: false },  // 任务是否生成中
   waitingNext: { type: Boolean, default: false },   // 是否等待续播
+  subtitleCues: { type: Array, default: () => [] }, // [{ text, start, end }]
+  subtitleIndex: { type: Number, default: -1 },     // 当前字幕下标
+  subtitleEnabled: { type: Boolean, default: true },
 })
 
-defineEmits(['play-segment', 'close'])
+defineEmits(['play-segment', 'close', 'seek-cue', 'toggle-subtitle'])
 
 const currentSegTitle = computed(() => {
   const seg = props.segments[props.currentIndex]
   return seg ? seg.title || '第 ' + seg.index + ' 段' : ''
+})
+
+// 面板内只展示当前句与前一句、后一句，避免字幕挤占分段列表空间
+const visibleCues = computed(() => {
+  const cues = props.subtitleCues
+  if (!cues.length) return []
+  const idx = Math.max(0, Math.min(props.subtitleIndex, cues.length - 1))
+  const from = Math.max(0, idx - 1)
+  return cues.slice(from, idx + 2).map((cue, i) => ({ ...cue, i: from + i }))
 })
 
 const doneCount = computed(() => props.segments.filter((s) => s.done).length)
@@ -109,7 +141,7 @@ const formatDuration = (sec) => {
 
 .gp-panel {
   width: min(560px, 100%);
-  max-height: min(76vh, 640px);
+  max-height: min(84vh, 700px);
   background: #fff;
   border-radius: 20px;
   padding: 20px 20px 14px;
@@ -182,6 +214,25 @@ const formatDuration = (sec) => {
   padding: 1px 6px;
   white-space: nowrap;
 }
+.gpp-subs-switch {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.gpp-subs-switch.active {
+  color: var(--app-primary, #6366f1);
+  background: #eef2ff;
+}
+.gpp-subs-switch:hover {
+  background: #e0e7ff;
+}
 .gpp-close {
   flex-shrink: 0;
   width: 34px;
@@ -214,11 +265,55 @@ const formatDuration = (sec) => {
   padding: 8px 12px;
 }
 
+.gpp-subs {
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid #e0e7ff;
+  background: #f8faff;
+  padding: 4px;
+}
+.gpp-sub-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gpp-sub-line:hover {
+  background: #eef2ff;
+}
+.gpp-sub-line.active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--app-primary, #6366f1) 14%, #fff), #fff);
+}
+.gpp-sub-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.gpp-sub-line.active .gpp-sub-time {
+  color: var(--app-primary, #6366f1);
+}
+.gpp-sub-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+.gpp-sub-line.active .gpp-sub-text {
+  color: #1e293b;
+  font-weight: 600;
+}
+
 .gpp-list {
   margin-top: 14px;
   overflow-y: auto;
   min-height: 120px;
-  max-height: 320px;
+  max-height: 260px;
   border-radius: 12px;
   border: 1px solid #f1f5f9;
   background: #f8fafc;
@@ -330,10 +425,16 @@ const formatDuration = (sec) => {
   .gpp-tip {
     display: none;
   }
+  .gpp-subs {
+    margin-top: 10px;
+  }
+  .gpp-sub-text {
+    font-size: 12px;
+  }
   .gpp-list {
     margin-top: 12px;
     min-height: 0;
-    max-height: 44vh;
+    max-height: 36vh;
     flex: 1;
   }
   .gpp-item {

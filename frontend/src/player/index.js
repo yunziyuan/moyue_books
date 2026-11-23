@@ -6,8 +6,14 @@ import { audiobookApi } from '@/api/audiobook'
 import { bookApi } from '@/api/book'
 import { ElMessage } from 'element-plus'
 import { createAudioElement, isNativeAudio } from './nativeAudio'
+import { buildSubtitleCues, findCueIndex } from './subtitles'
 
 // ===== 播放状态（全局单例） =====
+const SUBTITLE_KEY = 'audiobook_subtitle_enabled'
+const loadSubtitlePref = () => {
+  try { return localStorage.getItem(SUBTITLE_KEY) !== '0' } catch { return true }
+}
+
 export const playerState = reactive({
   task: null,          // 当前播放任务
   segments: [],        // 分段列表
@@ -18,6 +24,7 @@ export const playerState = reactive({
   currentTime: 0,      // 当前播放位置（秒）
   duration: 0,         // 当前段时长（秒）
   panelVisible: false, // 播放详情弹层
+  subtitleEnabled: loadSubtitlePref(), // 字幕开关（本地记忆）
 })
 
 // 本地播放记录（跨页面刷新兜底）
@@ -26,6 +33,7 @@ const PROGRESS_KEY = 'audiobook_progress'
 let audio = null
 let pollTimer = null
 let lastSaveAt = 0
+let currentAudioSrc = ''
 
 const isGenerating = () => playerState.task &&
   (playerState.task.status === 'processing' || playerState.task.status === 'pending')
@@ -36,6 +44,27 @@ export const currentSegTitle = computed(() => {
   const seg = playerState.segments[playerState.index]
   return seg ? seg.title || '第 ' + seg.index + ' 段' : ''
 })
+
+// 字幕时间轴：duration 未就绪时先用分段元数据里的估算时长，metadata 到达后自动刷新
+export const subtitleCues = computed(() => {
+  const seg = playerState.segments[playerState.index]
+  if (!seg || !seg.text) return []
+  const duration = playerState.duration > 0 ? playerState.duration : seg.duration
+  return buildSubtitleCues(seg.text, duration)
+})
+
+export const currentCueIndex = computed(() =>
+  findCueIndex(subtitleCues.value, playerState.currentTime)
+)
+
+export const currentCue = computed(() =>
+  currentCueIndex.value >= 0 ? subtitleCues.value[currentCueIndex.value] : null
+)
+
+export function toggleSubtitle() {
+  playerState.subtitleEnabled = !playerState.subtitleEnabled
+  try { localStorage.setItem(SUBTITLE_KEY, playerState.subtitleEnabled ? '1' : '0') } catch {}
+}
 
 export const progressWidth = computed(() =>
   playerState.duration ? (playerState.currentTime / playerState.duration) * 100 : 0
@@ -69,7 +98,10 @@ function ensureAudio() {
     updateMediaSession()
   })
   audio.addEventListener('loadedmetadata', () => {
-    playerState.duration = audio.duration || 0
+    // 切段瞬间旧音源可能仍报上一秒的时长；只接受当前音源的 metadata
+    if (audio.getAttribute('src') !== currentAudioSrc) return
+    const d = audio.duration
+    if (Number.isFinite(d) && d > 0) playerState.duration = d
   })
   if (isNativeAudio) {
     // 通知栏 / 锁屏 / 耳机媒体键的指令由原生 MediaSession 转发，统一走既有播放逻辑
@@ -117,15 +149,18 @@ function setSrcAndPlay(idx, seekTime) {
   playerState.waitingNext = false
   playerState.index = idx
   const src = audiobookApi.audioUrl(playerState.task.id, seg.file)
+  currentAudioSrc = src
+  // 切段时先回退到元数据里的估算时长，避免字幕短暂套用上一段时长
+  playerState.duration = seg.duration || 0
   if (audio.getAttribute('src') !== src) {
     audio.removeAttribute('src')
     audio.src = src
     audio.currentTime = 0
-    const seekTo = seekTime || 0
-    if (seekTo > 0) {
+    const resumeAt = seekTime || 0
+    if (resumeAt > 0) {
       audio.addEventListener('loadedmetadata', function once() {
         audio.removeEventListener('loadedmetadata', once)
-        try { audio.currentTime = seekTo } catch {}
+        try { audio.currentTime = resumeAt } catch {}
         audio.play().catch(() => {})
       })
     } else {
@@ -149,6 +184,7 @@ export async function openPlay(task, showPanel = true) {
   playerState.waitingNext = false
   playerState.currentTime = 0
   playerState.duration = 0
+  currentAudioSrc = ''
   updateMediaSession()
   await loadSegments()
   resumeFromRecord()
@@ -333,7 +369,10 @@ function onError(e) {
 function onTimeUpdate() {
   if (!audio) return
   playerState.currentTime = audio.currentTime
-  playerState.duration = audio.duration || playerState.duration
+  if (audio.getAttribute('src') === currentAudioSrc) {
+    const d = audio.duration
+    if (Number.isFinite(d) && d > 0) playerState.duration = d
+  }
   // 节流保存播放进度
   const now = Date.now()
   if (now - lastSaveAt > 8000) {
@@ -342,13 +381,21 @@ function onTimeUpdate() {
   }
 }
 
+// 跳转到指定秒数（字幕点击、进度条共用）
+export function seekTo(seconds) {
+  if (!audio || playerState.index < 0) return
+  const t = Math.max(0, Number(seconds) || 0)
+  try { audio.currentTime = t } catch {}
+  playerState.currentTime = t
+  saveProgress()
+}
+
 // 点击进度条定位
 export function seekByClick(e, el) {
   if (!audio || !playerState.duration) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  try { audio.currentTime = ratio * playerState.duration } catch {}
-  playerState.currentTime = audio.currentTime
+  seekTo(ratio * playerState.duration)
 }
 
 // 轮询分段（边生成边播放）
@@ -376,6 +423,7 @@ export function stopPlayer() {
   }
   saveProgress()
   stopPolling()
+  currentAudioSrc = ''
   playerState.playing = false
   playerState.waitingNext = false
   playerState.task = null
