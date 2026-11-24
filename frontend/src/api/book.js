@@ -117,9 +117,14 @@ export const bookApi = {
       : req
   },
 
-  // 更新进度（ttsLocation 为朗读断点 JSON 字符串，可省略）
-  updateProgress(id, progress, currentPage, ttsLocation = '') {
-    return axios.put(`${API_BASE}/books/${id}/progress`, { progress, current_page: currentPage, tts_location: ttsLocation })
+  // 更新进度（ttsLocation 为朗读断点 JSON 字符串，可省略；savedAt 为客户端单调序号）
+  updateProgress(id, progress, currentPage, ttsLocation = '', savedAt = 0) {
+    return axios.put(`${API_BASE}/books/${id}/progress`, {
+      progress,
+      current_page: currentPage,
+      tts_location: ttsLocation,
+      saved_at: savedAt
+    })
   },
 
   // 重新提取元数据

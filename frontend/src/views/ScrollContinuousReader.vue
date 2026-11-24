@@ -58,6 +58,7 @@ const positioned = ref(false)   // 揭幕标志：定位完成前容器透明，
 const iframeRefs = new Map()
 let resizeObserver = null
 let lastProgressEmit = 0
+let progressEmitTimer = null
 const defaultBlockHeight = 600
 
 // ===== 按需加载参数 =====
@@ -162,6 +163,10 @@ async function loadRange(from, to, concurrency = 6) {
 }
 
 onBeforeUnmount(() => {
+  if (progressEmitTimer) {
+    clearTimeout(progressEmitTimer)
+    progressEmitTimer = null
+  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -226,15 +231,32 @@ async function waitForBlockHeight(idx, maxTries = 30) {
 // 这里保留 alias 给 scrollToInitial 使用
 function estimatedBlockHeight() { return estimatedHeight.value }
 
+// 用真实 DOM 几何计算章节块顶部，避免估算高度随预加载变化导致进度/定位跳动
+function domBlockTop(idx) {
+  if (!rootEl.value) return null
+  const el = rootEl.value.querySelectorAll('.scr-block')[idx]
+  if (!el) return null
+  const rootRect = rootEl.value.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  return rect.top - rootRect.top + rootEl.value.scrollTop
+}
+
 function scrollToInitial() {
   if (!rootEl.value) return
   const idx = Math.max(0, Math.min(props.initialIndex, blocks.value.length - 1))
   const est = estimatedBlockHeight()
+  const el = rootEl.value.querySelectorAll('.scr-block')[idx]
+  // 首屏章节已渲染：直接用 DOM 位置 + 章内比例定位，最准确
+  if (el) {
+    const top = domBlockTop(idx) ?? 0
+    const h = el.getBoundingClientRect().height || est
+    rootEl.value.scrollTo({ top: top + h * props.initialFraction, behavior: 'auto' })
+    return
+  }
+  // 兜底：章节尚未渲染时仍按估算高度定位（与 blockTop 口径一致）
   let y = 0
   let loadedCount = 0
   let loadedHeight = 0
-  // 分段累加：已加载章节用真实高度，未加载章节用估算；
-  // 累计已加载章节数和高度，用于后续"已加载段平均高度"校正估算偏差
   for (let i = 0; i < idx; i++) {
     const b = blocks.value[i]
     if (b.loaded) {
@@ -247,12 +269,8 @@ function scrollToInitial() {
       y += est
     }
   }
-  // 当 idx 前面有较多已加载章节时，用它们的平均高度替换估算值
-  // （解决"前面的章节没加载完时估算偏差大"的问题）
   if (loadedCount >= 5) {
     const realAvg = loadedHeight / loadedCount
-    // 把前面那段"已经累加的估算值"重新计算：用真实平均
-    // （取真实平均与全局估算的中位数，兼顾已加载/未加载段）
     const effectiveEst = Math.round((realAvg + est) / 2)
     let y2 = 0
     for (let i = 0; i < idx; i++) {
@@ -834,44 +852,72 @@ function onScroll() {
 function onTouchStart() { /* 允许原生滚动 */ }
 function onTouchMove() { /* 允许原生滚动 */ }
 
-function scheduleProgressEmit() {
-  const now = Date.now()
-  if (now - lastProgressEmit < 100) return
-  lastProgressEmit = now
+function emitProgressNow() {
+  lastProgressEmit = Date.now()
   const p = computeProgress()
   if (p) emit('progress', p)
 }
 
+// 丢弃式节流会丢掉最后一次滚动（恰好停在关键位置时进度不落盘），
+// 这里保留一次尾随触发，确保最终位置一定被上报。
+function scheduleProgressEmit() {
+  const now = Date.now()
+  if (now - lastProgressEmit >= 100) {
+    if (progressEmitTimer) {
+      clearTimeout(progressEmitTimer)
+      progressEmitTimer = null
+    }
+    emitProgressNow()
+  } else if (!progressEmitTimer) {
+    progressEmitTimer = setTimeout(() => {
+      progressEmitTimer = null
+      emitProgressNow()
+    }, 120)
+  }
+}
+
 function computeProgress() {
   if (!rootEl.value) return null
-  const scrollTop = rootEl.value.scrollTop
-  const clientHeight = rootEl.value.clientHeight
-  let totalHeight = 0
-  for (const b of blocks.value) totalHeight += (b.height || 0)
-  if (totalHeight === 0) {
-    return { index: props.initialIndex || 0, fraction: 0, totalFraction: 0 }
+  const root = rootEl.value
+  const scrollTop = root.scrollTop
+  const clientHeight = root.clientHeight
+  const total = blocks.value.length
+  if (!total) return { index: 0, fraction: 0, totalFraction: 0 }
+
+  // 滚到底视为 100%，避免最后一段因估算高度偏差永远到不了末尾
+  if (root.scrollHeight - clientHeight - scrollTop <= 4) {
+    return { index: total - 1, fraction: 1, totalFraction: 1, scrollTop, totalHeight: root.scrollHeight }
   }
-  const scrollable = totalHeight - clientHeight
-  let cumY = 0
-  let currentIdx = 0
-  let blockY = 0
-  for (let i = 0; i < blocks.value.length; i++) {
-    const h = blocks.value[i].height || 0
-    if (cumY + h > scrollTop || i === blocks.value.length - 1) {
+
+  // 以真实 DOM 位置判定当前章节；未加载章节的占位块也有明确高度，口径与视口一致。
+  const nodes = root.querySelectorAll('.scr-block')
+  const rootRect = root.getBoundingClientRect()
+  let currentIdx = Math.max(0, Math.min(props.initialIndex || 0, total - 1))
+  let blockTopY = 0
+  let blockH = 0
+  for (let i = 0; i < nodes.length; i++) {
+    const rect = nodes[i].getBoundingClientRect()
+    const top = rect.top - rootRect.top + scrollTop
+    if (scrollTop >= top && scrollTop < top + rect.height) {
       currentIdx = i
-      blockY = cumY
+      blockTopY = top
+      blockH = rect.height
       break
     }
-    cumY += h
+    if (scrollTop >= top + rect.height) {
+      currentIdx = i
+      blockTopY = top
+      blockH = rect.height
+    }
   }
-  const blockH = blocks.value[currentIdx]?.height || 0
+  if (!blockH && nodes[currentIdx]) blockH = nodes[currentIdx].getBoundingClientRect().height
   const fraction = blockH > 0
-    ? Math.max(0, Math.min(1, (scrollTop - blockY) / blockH))
+    ? Math.max(0, Math.min(1, (scrollTop - blockTopY) / blockH))
     : 0
-  const totalFraction = scrollable > 0
-    ? Math.max(0, Math.min(1, scrollTop / scrollable))
-    : 0
-  return { index: currentIdx, fraction, totalFraction, scrollTop, totalHeight }
+  // 百分比只由「章节序号 + 章内比例」推导，与已加载章节数量无关，
+  // 因此预加载新章节不会让进度条回退。
+  const totalFraction = Math.max(0, Math.min(1, (currentIdx + fraction) / total))
+  return { index: currentIdx, fraction, totalFraction, scrollTop, totalHeight: root.scrollHeight }
 }
 
 // 预加载节流：避免 onScroll 高频触发时反复扫描 blocks
@@ -943,8 +989,10 @@ function currentIndexFromScroll(scrollTop, clientHeight, est) {
   return 0
 }
 
-// 计算第 idx 个章节块顶部的累计偏移（未加载的用估算高度），用于加载后保持滚动锚点
+// 计算第 idx 个章节块顶部的累计偏移，用于加载后保持滚动锚点；优先用真实 DOM 几何
 function blockTop(idx) {
+  const domTop = domBlockTop(idx)
+  if (domTop != null) return domTop
   const est = estimatedBlockHeight()
   let y = 0
   for (let i = 0; i < idx && i < blocks.value.length; i++) {

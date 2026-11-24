@@ -310,32 +310,45 @@ func UpdateProgress(c *gin.Context) {
 		Progress    float64 `json:"progress"`
 		CurrentPage int     `json:"current_page"`
 		TTSLocation string  `json:"tts_location"`
+		SavedAt     int64   `json:"saved_at"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	book.Progress = input.Progress
-	book.CurrentPage = input.CurrentPage
-	// 朗读断点：仅在传值非空时更新（老前端不带此字段，避免误清空历史断点）
-	if input.TTSLocation != "" {
-		book.TTSLocation = input.TTSLocation
-	}
-	now := time.Now()
-	book.LastRead = &now
 	// 列级更新：阅读中每 ~800ms 保存一次进度，若用 Save 全行保存，
 	// 会把含 TOC 目录缓存（可达数十 KB JSON）的整行重写，单连接 SQLite 下
 	// 大行写会排队阻塞其他查询（打开书籍/批注/目录）。只写变化的列。
 	updates := map[string]interface{}{
 		"progress":     input.Progress,
 		"current_page": input.CurrentPage,
-		"last_read":    now,
+		"last_read":    time.Now(),
 	}
+	// 朗读断点：仅在传值非空时更新（老前端不带此字段，避免误清空历史断点）
 	if input.TTSLocation != "" {
 		updates["tts_location"] = input.TTSLocation
 	}
-	config.DB.Model(&book).Updates(updates)
+	// 客户端单调序号：乱序到达的旧请求只更新 last_read 的做法会回退进度，
+	// 这里直接拒绝过期写入（不写 last_read，避免把后续新请求也挡住）。
+	query := config.DB.Model(&models.Book{}).Where("id = ? AND user_id = ?", book.ID, uid)
+	if input.SavedAt > 0 {
+		updates["progress_seq"] = input.SavedAt
+		query = query.Where("progress_seq <= ?", input.SavedAt)
+	}
+	res := query.Updates(updates)
+	if res.RowsAffected == 0 {
+		var fresh models.Book
+		config.DB.Where("user_id = ?", uid).First(&fresh, id)
+		c.JSON(http.StatusOK, fresh)
+		return
+	}
+	book.Progress = input.Progress
+	book.CurrentPage = input.CurrentPage
+	if input.TTSLocation != "" {
+		book.TTSLocation = input.TTSLocation
+	}
+	book.ProgressSeq = input.SavedAt
 	c.JSON(http.StatusOK, book)
 }
 

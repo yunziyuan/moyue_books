@@ -8,40 +8,41 @@ import (
 
 // Book 图书主表
 type Book struct {
-	ID          uint           `json:"id" gorm:"primaryKey;autoIncrement"`
-	UserID      uint           `json:"-" gorm:"not null;default:0;index"`
-	Title       string         `json:"title" gorm:"size:512;not null;index"`
-	Authors     string         `json:"authors" gorm:"type:text"`
-	Description string         `json:"description" gorm:"type:text"`
-	CoverPath   string         `json:"cover_path" gorm:"size:512"`
-	FilePath    string         `json:"file_path" gorm:"size:512;not null"`
-	FileType    string         `json:"file_type" gorm:"size:32;not null"`
-	FileSize    int64          `json:"file_size"`
-	Pages       int            `json:"pages"`
-	Publisher   string         `json:"publisher" gorm:"size:256"`
-	PublishDate string         `json:"publish_date" gorm:"size:64"`
-	Language    string         `json:"language" gorm:"size:32"`
-	ISBN        string         `json:"isbn" gorm:"size:64;index"`
-	Tags        string         `json:"tags" gorm:"type:text"`
-	Category    string         `json:"category" gorm:"size:128;index"`
+	ID          uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	UserID      uint   `json:"-" gorm:"not null;default:0;index"`
+	Title       string `json:"title" gorm:"size:512;not null;index"`
+	Authors     string `json:"authors" gorm:"type:text"`
+	Description string `json:"description" gorm:"type:text"`
+	CoverPath   string `json:"cover_path" gorm:"size:512"`
+	FilePath    string `json:"file_path" gorm:"size:512;not null"`
+	FileType    string `json:"file_type" gorm:"size:32;not null"`
+	FileSize    int64  `json:"file_size"`
+	Pages       int    `json:"pages"`
+	Publisher   string `json:"publisher" gorm:"size:256"`
+	PublishDate string `json:"publish_date" gorm:"size:64"`
+	Language    string `json:"language" gorm:"size:32"`
+	ISBN        string `json:"isbn" gorm:"size:64;index"`
+	Tags        string `json:"tags" gorm:"type:text"`
+	Category    string `json:"category" gorm:"size:128;index"`
 	// 书架使用习惯：仅在「指定书籍到书架」模式下生效，标记该图书是否显示在书架
-	InShelf     bool           `json:"in_shelf" gorm:"default:false;index"`
-	Series      string         `json:"series" gorm:"size:256"`
-	SeriesIndex float64        `json:"series_index"`
+	InShelf     bool    `json:"in_shelf" gorm:"default:false;index"`
+	Series      string  `json:"series" gorm:"size:256"`
+	SeriesIndex float64 `json:"series_index"`
 	// 媒体库来源：LibraryID 非空表示该图书来自某个媒体库，FilePath 指向源文件原始路径（不迁移）。
-	LibraryID      *uint  `json:"library_id" gorm:"index"`
-	LibraryRelPath string `json:"library_rel_path" gorm:"size:1024"` // 相对媒体库根目录的路径（稳定去重键）
-	SourceMissing  bool   `json:"source_missing" gorm:"default:false"` // 源文件是否已消失（被删除 / 移走）
-	SourceModTime  int64  `json:"-" gorm:"default:0"`                  // 源文件修改时间（秒），用于变更检测
-	Progress    float64        `json:"progress" gorm:"default:0"`
-	CurrentPage int            `json:"current_page" gorm:"default:0"`
-	LastRead    *time.Time     `json:"last_read"`
-	TOC         string         `json:"-" gorm:"type:text"`            // 目录缓存 JSON（统一目录接口产物）
-	TOCParsed   bool           `json:"-" gorm:"default:false"`        // 是否已尝试解析目录
-	TTSLocation string         `json:"tts_location" gorm:"type:text"` // 朗读断点 JSON：{type,page|chapter,sent}
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+	LibraryID      *uint          `json:"library_id" gorm:"index"`
+	LibraryRelPath string         `json:"library_rel_path" gorm:"size:1024"`   // 相对媒体库根目录的路径（稳定去重键）
+	SourceMissing  bool           `json:"source_missing" gorm:"default:false"` // 源文件是否已消失（被删除 / 移走）
+	SourceModTime  int64          `json:"-" gorm:"default:0"`                  // 源文件修改时间（秒），用于变更检测
+	Progress       float64        `json:"progress" gorm:"default:0"`
+	CurrentPage    int            `json:"current_page" gorm:"default:0"`
+	ProgressSeq    int64          `json:"-" gorm:"default:0;index"` // 客户端进度写入序号，用于拒绝乱序旧请求
+	LastRead       *time.Time     `json:"last_read"`
+	TOC            string         `json:"-" gorm:"type:text"`            // 目录缓存 JSON（统一目录接口产物）
+	TOCParsed      bool           `json:"-" gorm:"default:false"`        // 是否已尝试解析目录
+	TTSLocation    string         `json:"tts_location" gorm:"type:text"` // 朗读断点 JSON：{type,page|chapter,sent}
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 // Annotation 批注/划线表
@@ -110,7 +111,7 @@ type ReadingHistory struct {
 	UserID    uint       `json:"-" gorm:"not null;default:0;index"`
 	BookID    uint       `json:"book_id" gorm:"not null;index"`
 	Type      string     `json:"type" gorm:"default:read;index"` // read=阅读, tts=朗读
-	Engine    string     `json:"engine"`                        // 朗读引擎（edge-tts 等），仅 tts 记录
+	Engine    string     `json:"engine"`                         // 朗读引擎（edge-tts 等），仅 tts 记录
 	StartPage int        `json:"start_page"`
 	EndPage   int        `json:"end_page"`
 	Duration  int        `json:"duration"` // 秒

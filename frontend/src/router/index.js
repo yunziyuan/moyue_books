@@ -3,7 +3,7 @@ import { getToken } from '@/api/auth'
 import { getServerUrl } from '@/utils/serverConfig'
 import { isAndroidNative } from '@/utils/platform'
 import Bookshelf from '@/views/Bookshelf.vue'
-import ReaderEntry from '@/views/ReaderEntry.vue'
+
 import Upload from '@/views/Upload.vue'
 import BookDetail from '@/views/BookDetail.vue'
 import Collections from '@/views/Collections.vue'
@@ -26,7 +26,8 @@ const routes = [
   { path: '/bookshelf', name: 'Bookshelf', component: Bookshelf },
   { path: '/upload', name: 'Upload', component: Upload },
   { path: '/book/:id', name: 'BookDetail', component: BookDetail, props: true },
-  { path: '/reader/:id', name: 'Reader', component: ReaderEntry, props: true },
+  // 阅读器（含 foliate/pdf.js）体积较大，按需加载，避免拖慢书架首屏
+  { path: '/reader/:id', name: 'Reader', component: () => import('@/views/ReaderEntry.vue'), props: true },
   { path: '/collections', name: 'Collections', component: Collections },
   { path: '/categories', name: 'Categories', component: Categories },
   { path: '/libraries', name: 'Libraries', component: LibraryHub },

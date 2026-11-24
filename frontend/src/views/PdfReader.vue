@@ -292,14 +292,13 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api/book'
 import { reviewApi } from '@/api/review'
-import { getToken } from '@/api/auth'
-import { API_BASE, wsApiBase } from '@/config'
+import { wsApiBase } from '@/config'
 import { loadReaderPrefs, saveReaderPrefs } from '@/utils/readerPrefs'
 import { markdownToText } from '@/utils/markdown'
 import { copyText } from '@/utils/clipboard'
 import { notifyProgressUpdate } from '@/utils/progressSync'
+import { createProgressWriter } from '@/utils/progressWriter'
 import * as pdfjsLib from 'pdfjs-dist'
-import { nativeFetch } from '@/utils/nativeHttp'
 
 // 用 BASE_URL 拼接：兼容网关前缀（/app/moyue/pdf.worker.min.js）与 App file:// 相对加载
 pdfjsLib.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.js`
@@ -439,9 +438,9 @@ const ttsPaused = ref(false)
 const ttsPdfPage = ref(0)
 // 已保存的朗读断点（打开书时从 book.tts_location 解析）：{ type: 'pdf'|'epub', page|chapter, sent }
 const savedTtsLocation = ref(null)
-// 阅读进度保存节流（定时器 + 防重入）
+// 阅读进度保存：统一写入器串行请求，避免并发乱序覆盖
 let progressSaveTimer = null
-let progressSaving = false
+const progressWriter = createProgressWriter(props.id)
 const ttsLoading = ref(false)
 const ttsSentences = ref([])
 const ttsIndex = ref(-1)
@@ -1278,10 +1277,19 @@ const buildTtsLocation = () => {
   return null
 }
 
-// 立即保存阅读进度 + 朗读断点（keepalive 用于页面关闭时尽可能送达）
-// 返回 Promise 以便调用方 await 完成（保证退出阅读器时进度已落库）
-const doSaveProgress = (keepalive = false) => {
-  if (!book.value || progressSaving) return Promise.resolve()
+// 显示、保存、恢复统一使用同一套锚点公式：
+// PDF 以页码为锚点，EPUB 以「章节 + 章内比例」为锚点，不再混用容器滚动百分比。
+const pdfProgressForPage = (p) => {
+  const total = totalPdfPages.value
+  return total > 1 ? Math.max(0, Math.min(100, ((p - 1) / (total - 1)) * 100)) : 0
+}
+const chapterProgress = (idx, frac = 0) => {
+  const n = chapters.value.length
+  const f = Math.max(0, Math.min(0.999, frac))
+  return n > 0 ? Math.max(0, Math.min(100, ((idx + f) / n) * 100)) : 0
+}
+
+const buildProgressPayload = () => {
   const ft = book.value.file_type?.toLowerCase()
   let progress, page
   const loc = buildTtsLocation()
@@ -1289,36 +1297,36 @@ const doSaveProgress = (keepalive = false) => {
     // 朗读时以朗读页为准，否则用视口页
     const reading = ttsActive.value || pdfTtsActive.value
     const p = reading && ttsPdfPage.value ? ttsPdfPage.value : currentPdfPage.value
-    progress = totalPdfPages.value > 1 ? ((p - 1) / (totalPdfPages.value - 1)) * 100 : 0
+    progress = pdfProgressForPage(p)
     page = p
   } else {
     progress = currentProgress.value
     page = currentChapter.value
   }
-  progress = Math.max(0, Math.min(100, progress))
-  const ttsLoc = loc ? JSON.stringify(loc) : ''
-  if (keepalive) {
-    try {
-      const headers = { 'Content-Type': 'application/json' }
-      const token = getToken()
-      if (token) headers.Authorization = `Bearer ${token}`
-      nativeFetch(`${API_BASE}/books/${props.id}/progress`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ progress, current_page: page, tts_location: ttsLoc }),
-        keepalive: true
-      }).catch(() => {})
-      return
-    } catch (e) { /* fallthrough 到 axios */ }
+  return {
+    progress: Math.max(0, Math.min(100, progress)),
+    currentPage: page,
+    ttsLocation: loc ? JSON.stringify(loc) : ''
   }
-  progressSaving = true
-  return bookApi.updateProgress(props.id, progress, page, ttsLoc)
-    .then(() => {
-      // 保存成功后通知全局 store，详情页/书架可实时刷新进度
-      notifyProgressUpdate(props.id, { progress, current_page: page, tts_location: ttsLoc })
+}
+
+// 立即保存阅读进度 + 朗读断点（keepalive 用于页面关闭时尽可能送达）
+// 返回 Promise 以便调用方 await 完成（保证退出阅读器时进度已落库）
+const doSaveProgress = (keepalive = false) => {
+  if (!book.value) return Promise.resolve()
+  const payload = buildProgressPayload()
+  if (keepalive) {
+    progressWriter.flushKeepalive(payload)
+    return Promise.resolve()
+  }
+  return progressWriter.queue(payload).then(() => {
+    // 保存成功后通知全局 store，详情页/书架可实时刷新进度
+    notifyProgressUpdate(props.id, {
+      progress: payload.progress,
+      current_page: payload.currentPage,
+      tts_location: payload.ttsLocation
     })
-    .catch(() => {})
-    .finally(() => { progressSaving = false })
+  })
 }
 
 // 同步落库进度（用于退出阅读器/卸载组件时 await，确保详情页 reload 拿到最新进度）
@@ -1328,6 +1336,7 @@ const flushProgressSave = async () => {
     progressSaveTimer = null
   }
   await doSaveProgress()
+  await progressWriter.flush()
 }
 
 // 节流保存：朗读每句/滚动时 2s 合并一次；force 用于翻页/停止/卸载等关键节点立即保存
@@ -2111,22 +2120,20 @@ const scrollEpubToChapter = async (index, frac = 0) => {
   container.scrollTop = top + Math.min(Math.max(frac, 0), 0.999) * iframe.offsetHeight
   currentChapter.value = index
   if (epubIframes[index]) currentIframe.value = epubIframes[index]
-  updateProgressFromChapter()
-  if (frac > 0 && chapters.value.length > 1) {
-    currentProgress.value = ((index + Math.min(frac, 0.999)) / chapters.value.length) * 100
-  }
+  currentProgress.value = chapterProgress(index, frac)
   scheduleProgressSave()
 }
 
-// 滚动模式：基于容器的真实 scrollTop/scrollHeight 比例计算进度，
-// 准确反映已读内容占比（不受章节长度不均影响）。
+// 章内滚动偏移：以当前章节 iframe 为基准算比例，而不是容器总滚动比例。
+// 容器只加载了片段章节，用总滚动比例会让进度随预加载窗口变化而漂移。
 const saveScrollOffset = () => {
   const container = document.getElementById('epub-viewer')
-  if (!container) return
-  const total = container.scrollHeight - container.clientHeight
-  if (total <= 0) return
-  const ratio = container.scrollTop / total
-  currentProgress.value = Math.max(0, Math.min(100, ratio * 100))
+  const iframe = epubIframes[currentChapter.value]
+  if (!container || !iframe) return
+  const top = iframe.offsetTop
+  const height = iframe.offsetHeight || 1
+  const frac = Math.max(0, Math.min(0.999, (container.scrollTop - top) / height))
+  currentProgress.value = chapterProgress(currentChapter.value, frac)
 }
 
 // 滚动状态联动：确定当前阅读章节、保存进度、滚动到底自动加载下一章
@@ -2192,9 +2199,10 @@ const onEpubScroll = () => {
   })
 }
 
-// 初始化/重建滚动容器：清空后从起始章附近开始顺序加载
-// startPos 支持浮点章节位置（整数部分=章节，小数部分=章内滚动比例）
-const initEpubScroll = async (startPos) => {
+// 初始化/重建滚动容器：按 0~100 进度百分比恢复到「章节 + 章内比例」锚点。
+// 旧实现把百分比直接乘以"已加载 5 章"的 scrollHeight，导致恢复位置随预加载窗口漂移；
+// 章节数 >100 时还会把 50% 误判成"第 50 章"。
+const initEpubScroll = async (progressPct = 0) => {
   const container = document.getElementById('epub-viewer')
   if (!container) return
   container.innerHTML = ''
@@ -2204,45 +2212,18 @@ const initEpubScroll = async (startPos) => {
   epubScrollBusy = false
 
   const n = chapters.value.length
-  // 支持两种入参：
-  //  - 浮点章节位置（旧接口，向后兼容）
-  //  - 0~100 的进度百分比（与 saveScrollOffset 公式配套）
-  let targetPct = 0
-  if (n > 1) {
-    if (startPos > n - 1) {
-      // 进度百分比模式
-      targetPct = Math.max(0, Math.min(startPos, 100)) / 100
-    } else {
-      // 浮点章节位置模式：换算成近似百分比
-      targetPct = startPos / (n - 1)
-    }
-  }
-  // 起始章节：基于百分比推算（精度足够，无需加载全部章节）
-  const start = Math.min(Math.floor(targetPct * n), n - 1)
+  if (!n) return
+  const pct = Math.max(0, Math.min(100, Number(progressPct) || 0))
+  const pos = (pct / 100) * n
+  const start = Math.min(n - 1, Math.floor(pos))
+  const frac = start === n - 1 ? (pos >= n ? 0.999 : pos - start) : pos - start
   // 预加载起始章前后章节，保证初始即可向前/向后连续滚动
   const preStart = Math.max(0, start - 2)
   const preEnd = Math.min(n - 1, start + 2)
   for (let i = preStart; i <= preEnd; i++) {
     await appendEpubChapter(i)
   }
-  // 滚到目标百分比对应的真实位置（与 saveScrollOffset 同源）
-  const total = container.scrollHeight - container.clientHeight
-  if (total > 0) {
-    container.scrollTop = total * targetPct
-  }
-  // 同步当前章节
-  if (epubLoadedChapters.length) {
-    const viewTop = container.scrollTop + 80
-    let cur = epubLoadedChapters[0]
-    for (const idx of epubLoadedChapters) {
-      const iframe = epubIframes[idx]
-      if (!iframe) continue
-      if (iframe.offsetTop <= viewTop) cur = idx
-      else break
-    }
-    currentChapter.value = cur
-    currentIframe.value = epubIframes[cur] || null
-  }
+  await scrollEpubToChapter(start, frac)
 }
 
 
@@ -2263,9 +2244,7 @@ const renderChapter = async (index) => {
 }
 
 const updateProgressFromChapter = () => {
-  if (chapters.value.length > 0) {
-    currentProgress.value = (currentChapter.value / chapters.value.length) * 100
-  }
+  currentProgress.value = chapterProgress(currentChapter.value, 0)
 }
 
 // === PDF 渲染 ===
@@ -3339,21 +3318,11 @@ const onProgressMarkClick = (m) => {
 const applyProgress = (pct) => {
   const ft = book.value?.file_type?.toLowerCase()
   if (ft === 'pdf') {
-    if (!pdfContainer.value) return
-    const c = pdfContainer.value
-    const maxScroll = c.scrollHeight - c.clientHeight
-    if (maxScroll <= 0) return
-    // 与显示公式（scrollTop/maxScroll）同源：先换算目标滚动位置，再找最近的页面
-    const targetScroll = Math.max(0, Math.min(maxScroll, (pct / 100) * maxScroll))
-    let target = 1
-    let best = Infinity
-    for (const p of pageInfos.value) {
-      const pEl = document.getElementById('pdf-page-' + p.num)
-      if (!pEl) continue
-      const d = Math.abs(pEl.offsetTop - targetScroll)
-      if (d < best) { best = d; target = p.num }
-    }
+    if (!pdfContainer.value || totalPdfPages.value <= 0) return
+    // 与页码锚点公式一致：百分比线性换算成页码
+    const target = Math.max(1, Math.min(totalPdfPages.value, Math.round(1 + (pct / 100) * (totalPdfPages.value - 1))))
     currentPdfPage.value = target
+    currentProgress.value = pdfProgressForPage(target)
     scrollToPdfPage(target)
     scheduleProgressSave(true)
   } else if (ft === 'epub' || ft === 'kepub' || ft === 'azw3') {
@@ -3362,22 +3331,17 @@ const applyProgress = (pct) => {
   }
 }
 
-// EPUB 按百分比跳转：先按章节数线性估算目标章并补齐加载，再按已加载内容高度比例定位
-// （与 saveScrollOffset 显示公式同源，保证"点哪跳哪"，不受各章长短不均影响）
+// EPUB 按百分比跳转：百分比线性映射到章节锚点，补齐加载后按章节位置定位
 const jumpEpubToPercent = async (pct) => {
-  const container = document.getElementById('epub-viewer')
-  if (!container) return
   const n = chapters.value.length
+  if (!n) return
   const p = Math.max(0, Math.min(pct, 100))
-  // 1) 线性估算目标章节并确保其前后章节已加载，让点击位置附近的内容真实存在
-  const est = Math.min(n - 1, Math.floor((p / 100) * n))
-  await ensureEpubChaptersAround(est)
-  // 2) 与显示公式同源定位：scrollTop = pct * (scrollHeight - clientHeight)
-  const maxScroll = container.scrollHeight - container.clientHeight
-  if (maxScroll <= 0) return
-  container.scrollTop = Math.max(0, Math.min(maxScroll, (p / 100) * maxScroll))
+  const pos = (p / 100) * n
+  const idx = Math.min(n - 1, Math.floor(pos))
+  const frac = idx === n - 1 ? (pos >= n ? 0.999 : pos - idx) : pos - idx
+  await ensureEpubChaptersAround(idx)
+  await scrollEpubToChapter(idx, frac)
   updateEpubScrollState()
-  saveScrollOffset()
   scheduleProgressSave(true)
 }
 
@@ -3639,11 +3603,8 @@ const throttledScroll = () => {
 
 const handlePdfScroll = () => {
   if (!pdfContainer.value) return
-  const c = pdfContainer.value
-  const maxScroll = c.scrollHeight - c.clientHeight
-  if (maxScroll > 0) {
-    currentProgress.value = (c.scrollTop / maxScroll) * 100
-  }
+  // 与保存/恢复同源：PDF 进度只由当前页决定，不用容器滚动比例
+  currentProgress.value = pdfProgressForPage(currentPdfPage.value || 1)
   scheduleProgressSave() // 滚动阅读时节流记录位置
 }
 
@@ -3685,7 +3646,7 @@ watch([fontSize, lineHeight, pageMargin, fontFamily], () => {
   })
   if (book.value?.file_type?.toLowerCase() !== 'pdf') {
     // 滚动模式：重建整个滚动容器让所有章节应用新样式
-    initEpubScroll(currentChapter.value)
+    initEpubScroll(currentProgress.value)
   }
 })
 

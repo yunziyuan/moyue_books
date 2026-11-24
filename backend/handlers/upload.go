@@ -619,18 +619,16 @@ func ServeBookContent(c *gin.Context) {
 		}
 	}
 
-	// 返回指定章节内容
+	// 返回指定章节内容（缓存解析后的阅读器，避免每次翻页重新解析整本书）
 	chapter, _ := strconv.Atoi(chapterStr)
-	reader, err := openBookReader(utils.ResolvePath(book.FilePath), book.FileType)
+	var content []byte
+	err := withCachedBookReader(utils.ResolvePath(book.FilePath), book.FileType, func(r bookReader) error {
+		var e error
+		content, e = r.GetContent(chapter)
+		return e
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open book"})
-		return
-	}
-	defer reader.Close()
-
-	content, err := reader.GetContent(chapter)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read book content"})
 		return
 	}
 
@@ -657,13 +655,12 @@ func ServeBookResource(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
 		return
 	}
-	reader, err := openBookReader(utils.ResolvePath(book.FilePath), book.FileType)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open book"})
-		return
-	}
-	defer reader.Close()
-	data, err := reader.GetResource(path)
+	var data []byte
+	err := withCachedBookReader(utils.ResolvePath(book.FilePath), book.FileType, func(r bookReader) error {
+		var e error
+		data, e = r.GetResource(path)
+		return e
+	})
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

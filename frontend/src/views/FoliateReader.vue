@@ -426,6 +426,7 @@ import ScrollContinuousReader from './ScrollContinuousReader.vue'
 
 import { bookApi } from '@/api/book'
 import { notifyProgressUpdate } from '@/utils/progressSync'
+import { createProgressWriter } from '@/utils/progressWriter'
 import { getToken } from '@/api/auth'
 import { staticBase, API_BASE } from '@/config'
 import { loadReaderPrefs, saveReaderPrefs } from '@/utils/readerPrefs'
@@ -752,6 +753,11 @@ function buildCSS() {
 // ============ 加载与打开 ============
 async function loadBookInfo() {
   if (bookInfo.value) return
+  // ReaderEntry 已经取过元数据，直接复用；避免每本书进入阅读页都串行多发一次 getBook。
+  if (props.book?.id) {
+    bookInfo.value = props.book
+    return
+  }
   const { data } = await bookApi.getBook(props.id)
   bookInfo.value = data
 }
@@ -903,42 +909,72 @@ function updateChapterTitle(idx) {
 // 连续滚动阅读器的核心机制（80% 预加载、进度保存、章节导航）全部由
 // ScrollContinuousReader 内部处理，这里只暴露必要回调。
 
-// 进度保存：连续滚动没有 CFI，按章节 index + 节内 fraction 持久化。
-// debounce 缩到 800ms，确保用户中途退出（goBack / 跳详情）也能很快同步到后端
+// 进度保存：连续滚动没有 CFI，以「章节 index + 节内 fraction」为唯一进度源。
+// 显示百分比与落库百分比都由同一公式推导，不再让"滚动高度占比"和"章节占比"打架。
+const progressWriter = createProgressWriter(props.id)
 let saveTimer = null
-function scheduleSave(idx, frac) {
-  clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => doSave(idx, frac), 800)
-}
-async function doSave(idx, frac) {
-  try {
-    localStorage.setItem(`foli_loc_${props.id}`, JSON.stringify({ i: idx, f: frac }))
-  } catch {}
+let latestAnchor = { index: 0, fraction: 0 }
+
+function anchorPercent(idx, frac) {
   const secCount = continuousSections.value.length
-  const total = secCount > 0
-    ? Math.round((idx + frac) / secCount * 100)
-    : 0
+  const f = Math.max(0, Math.min(1, frac || 0))
+  return secCount > 0 ? Math.max(0, Math.min(100, Math.round(((idx + f) / secCount) * 100))) : 0
+}
+
+function buildProgressPayload(idx, frac) {
   // 朗读断点：朗读中按「朗读章节 + 句号」保存，否则传空串（后端不更新已有断点）
   const ttsLoc = tts.active
     ? JSON.stringify({ type: 'epub', chapter: ttsChapter.value, sent: Math.max(0, tts.index) })
     : ''
-  // 本地已同步落盘；后端上报异步进行（goBack 不再 await，返回不卡顿）。
-  // 保存成功后通知全局 store，详情页/书架实时联动。
+  return {
+    progress: anchorPercent(idx, frac),
+    currentPage: idx,
+    ttsLocation: ttsLoc
+  }
+}
+
+function scheduleSave(idx, frac) {
+  latestAnchor = { index: idx, fraction: frac }
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    doSave(latestAnchor.index, latestAnchor.fraction)
+  }, 800)
+}
+
+async function doSave(idx, frac) {
   try {
-    await bookApi.updateProgress(props.id, total, idx, ttsLoc)
-    // 保存成功后通知全局 store，详情页/书架实时联动
-    try { notifyProgressUpdate(props.id, { progress: total, current_page: idx }) } catch {}
+    localStorage.setItem(`foli_loc_${props.id}`, JSON.stringify({ i: idx, f: frac }))
   } catch {}
+  const payload = buildProgressPayload(idx, frac)
+  try {
+    await progressWriter.queue(payload)
+    try { notifyProgressUpdate(props.id, { progress: payload.progress, current_page: payload.currentPage }) } catch {}
+  } catch {}
+}
+
+// keepalive：页面隐藏时立刻发出最新值，不等在途请求；后端按 saved_at 拒绝乱序旧请求。
+function onPageHide() {
+  clearTimeout(saveTimer)
+  saveTimer = null
+  if (!continuousReady.value) return
+  const p = continuousReaderRef.value?.getProgress?.() || latestAnchor
+  if (p) progressWriter.flushKeepalive(buildProgressPayload(p.index, p.fraction))
 }
 async function flushSave() {
   clearTimeout(saveTimer)
-  const p = continuousReaderRef.value?.getProgress?.()
-  if (p) await doSave(p.index, p.fraction)
+  saveTimer = null
+  // 阅读器尚未就绪时不要写 0%，否则会把后端已有的真实进度覆盖掉
+  if (continuousReady.value) {
+    const p = continuousReaderRef.value?.getProgress?.() || latestAnchor
+    if (p) await doSave(p.index, p.fraction)
+  }
+  await progressWriter.flush()
 }
 
 function onContinuousProgress(p) {
   if (!p) return
-  progress.value = Math.round(p.totalFraction * 100)
+  progress.value = anchorPercent(p.index, p.fraction)
   // 连续滚动无单章内的"页"概念，清空旧分页的标签
   pageLabel.value = ''
   // 章节切换时更新标题
@@ -1661,9 +1697,9 @@ function onKey(e) {
 onMounted(async () => {
   document.addEventListener('keydown', onKey)
   document.addEventListener('mousedown', onDocMouseDown)
-  window.addEventListener('pagehide', flushSave)
+  window.addEventListener('pagehide', onPageHide)
   window.addEventListener('pagehide', beaconReadingSession)
-  window.addEventListener('beforeunload', flushSave)
+  window.addEventListener('beforeunload', onPageHide)
   prestartFileFetch() // 立即并行下载书籍文件，不等元数据/批注请求
   // 阅读/朗读会话统计：EPUB 与 PDF 统一由本外壳计时上报
   startReadingSession()
@@ -1689,9 +1725,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
   document.removeEventListener('mousedown', onDocMouseDown)
-  window.removeEventListener('pagehide', flushSave)
+  window.removeEventListener('pagehide', onPageHide)
   window.removeEventListener('pagehide', beaconReadingSession)
-  window.removeEventListener('beforeunload', flushSave)
+  window.removeEventListener('beforeunload', onPageHide)
   flushSave() // 先落库进度与朗读断点（请求同步发出）
   tts.stop() // 再停止音频与 WebSocket，避免进行中的合成写入过期断点
   continuousReaderRef.value?.clearSentenceHighlight?.()
