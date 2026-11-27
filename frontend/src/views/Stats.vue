@@ -317,7 +317,12 @@ const fmtClock = (t) => {
 }
 
 // 朗读引擎中文名
-const engineLabel = (e) => (e === 'browser' ? '浏览器离线' : e === 'edge-tts' ? '云端' : e || '')
+const engineLabel = (e) => ({
+  browser: '浏览器离线',
+  'edge-tts': '云端',
+  xunfei: '讯飞',
+  deepseek: 'DeepSeek'
+}[e] || e || '')
 
 const isToday = (dayStr) => dayStr === todayStr.value
 

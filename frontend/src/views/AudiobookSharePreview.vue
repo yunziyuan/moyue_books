@@ -167,7 +167,14 @@ const voiceDisplay = (v, engine) => {
     'zh-CN-XiaomoNeural': '晓墨',
     'zh-CN-XiaoruiNeural': '晓睿',
     'zh-CN-XiaoshuangNeural': '晓双',
-    'zh-CN-YunhaoNeural': '云皓'
+    'zh-CN-YunhaoNeural': '云皓',
+    xiaoyan: '晓燕',
+    xiaoyuan: '晓媛',
+    xiaofeng: '晓峰',
+    xiaoli: '晓莉',
+    xiaoyu: '晓宇',
+    stella: '海星',
+    tide: '暗潮'
   }
   return map[v] || v
 }
@@ -178,7 +185,7 @@ const speedDisplay = (s) => {
 }
 
 const engineDisplay = (e) => {
-  const map = { 'edge-tts': 'Edge TTS', 'gpt-sovits': 'GPT-SoVITS', 'fish-speech': 'Fish Speech', 'chattts': 'ChatTTS', browser: '浏览器离线', auto: '自动' }
+  const map = { 'edge-tts': 'Edge TTS', 'gpt-sovits': 'GPT-SoVITS', 'fish-speech': 'Fish Speech', 'chattts': 'ChatTTS', xunfei: '讯飞 TTS', deepseek: 'DeepSeek TTS', browser: '浏览器离线', auto: '自动' }
   return (map[e] || e || 'Edge TTS')
 }
 

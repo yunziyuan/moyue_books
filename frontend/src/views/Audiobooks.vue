@@ -206,13 +206,13 @@
         <el-form-item label="朗读音色">
           <el-select v-model="generateForm.voice" filterable placeholder="请选择音色" style="width: 100%">
             <el-option-group v-if="femaleVoices.length" label="女声">
-              <el-option v-for="v in femaleVoices" :key="v.short_name" :label="v.friendly_name" :value="v.short_name" />
+              <el-option v-for="v in femaleVoices" :key="v.short_name" :label="voiceLabel(v)" :value="v.short_name" />
             </el-option-group>
             <el-option-group v-if="maleVoices.length" label="男声">
-              <el-option v-for="v in maleVoices" :key="v.short_name" :label="v.friendly_name" :value="v.short_name" />
+              <el-option v-for="v in maleVoices" :key="v.short_name" :label="voiceLabel(v)" :value="v.short_name" />
             </el-option-group>
             <el-option-group v-if="otherVoices.length" label="其他">
-              <el-option v-for="v in otherVoices" :key="v.short_name" :label="v.friendly_name" :value="v.short_name" />
+              <el-option v-for="v in otherVoices" :key="v.short_name" :label="voiceLabel(v)" :value="v.short_name" />
             </el-option-group>
             <template #empty>
               <div class="voice-empty">音色列表加载失败，将使用默认音色</div>
@@ -220,19 +220,34 @@
           </el-select>
         </el-form-item>
         <el-form-item label="生成引擎">
-          <el-select v-model="generateForm.engine" style="width: 100%">
-            <el-option v-for="e in engineOptions" :key="e.key" :label="e.label" :value="e.key">
-              <span class="engine-opt-label">{{ e.label }}</span>
-              <span v-if="e.desc" class="engine-opt-desc">{{ e.desc }}</span>
-            </el-option>
-          </el-select>
-          <div class="engine-opt-tip">
-            微软 Edge TTS 在受限网络下可能不可用（403 / 握手失败）：后端已内置时钟偏移校正自动重试；若仍失败，请在启动后端的环境中设置环境变量 EDGE_TTS_PROXY 或 HTTPS_PROXY 让其经代理出网。「自动」会在 Edge TTS 失败时回退到已配置的本地引擎。
+          <div class="engine-cards">
+            <button
+              v-for="e in engineOptions"
+              :key="e.key"
+              type="button"
+              class="engine-card"
+              :class="[`engine-${e.key}`, { active: generateForm.engine === e.key, unavailable: e.available === false }]"
+              :disabled="e.available === false"
+              @click="generateForm.engine = e.key"
+            >
+              <span class="engine-card-head">
+                <span class="engine-mark">{{ engineMark(e.key) }}</span>
+                <span class="engine-name">{{ engineShortName(e) }}</span>
+                <el-icon v-if="generateForm.engine === e.key" class="engine-check"><Check /></el-icon>
+                <span v-else-if="e.available === false" class="engine-off">未配置</span>
+              </span>
+              <span class="engine-desc">{{ engineShortDesc(e) }}</span>
+            </button>
           </div>
+          <div v-if="currentEngineUnavailable" class="engine-setup">
+            <span>该引擎需要先配置密钥。</span>
+            <el-button link type="primary" @click="openTtsSettings">去设置</el-button>
+          </div>
+          <div v-else class="engine-setup-hint">按量计费引擎会产生费用；「自动」仅在 Edge TTS 失败时回退本地引擎。</div>
         </el-form-item>
         <el-form-item label="朗读语速">
           <div class="speed-row">
-            <el-slider v-model="generateForm.speed_factor" :min="0.5" :max="2" :step="0.1" style="flex: 1" />
+            <el-slider v-model="generateForm.speed_factor" :min="0.5" :max="2" :step="0.1" style="flex: 1" :disabled="generateForm.engine === 'deepseek'" />
             <span class="speed-val">{{ generateForm.speed_factor.toFixed(1) }}x</span>
           </div>
         </el-form-item>
@@ -456,9 +471,12 @@ const progressPercent = (t) => {
 const progressColor = (p) => (p >= 100 ? '#34d399' : '#6366f1')
 
 const voiceDisplay = (v) => (v || '默认音色').replace(/^Microsoft Server Speech Text to Speech Voice \(/i, '').replace(/\)$/, '')
-// 卡片音色展示：浏览器离线任务显示「本机语音」（voice 字段存的是本机 voiceURI，不宜直出）
-const taskVoiceLabel = (t) =>
-  t.engine === 'browser' ? '本机语音' : voiceDisplay(t.voice)
+// 卡片音色展示：浏览器离线任务显示「本机语音」，云端引擎优先显示友好名
+const taskVoiceLabel = (t) => {
+  if (t.engine === 'browser') return '本机语音'
+  const named = (allEngineVoices.value[t.engine] || []).find((v) => v.short_name === t.voice)
+  return named ? named.friendly_name : voiceDisplay(t.voice)
+}
 const formatMinutes = (segments) => {
   const total = playDurationOf(segments)
   return total >= 60 ? Math.round(total / 60) + '+' : Math.max(1, Math.round(total)) + ''
@@ -515,31 +533,69 @@ function stopPolling() {
 const generateVisible = ref(false)
 const generateBook = ref(null)
 const generating = ref(false)
-const voices = ref([])
+const voices = ref([]) // 当前引擎可用音色
+const allEngineVoices = ref({})
 const generateForm = reactive({ voice: '', speed_factor: 1.0, engine: 'auto' })
 // 引擎选项：auto（edge-tts 失败自动回退本地引擎）+ 后端下发的云端引擎列表
 const engineOptions = ref([
   { key: 'auto', label: '自动（推荐）', desc: 'Edge TTS 优先，失败自动切换本地引擎' }
 ])
+const engineMeta = {
+  auto: { mark: 'A', name: '自动', desc: 'Edge 失败自动回退' },
+  'edge-tts': { mark: 'E', name: 'Edge TTS', desc: '免费 · 微软在线' },
+  xunfei: { mark: '讯', name: '讯飞 TTS', desc: '按量计费 · MP3' },
+  deepseek: { mark: 'D', name: 'DeepSeek', desc: '按量计费 · WAV' }
+}
+const engineMark = (key) => engineMeta[key]?.mark || 'T'
+const engineShortName = (e) => engineMeta[e.key]?.name || e.label
+const engineShortDesc = (e) => engineMeta[e.key]?.desc || e.desc
+const currentEngineUnavailable = computed(() =>
+  engineOptions.value.some((e) => e.key === generateForm.engine && e.available === false)
+)
+const voiceLabel = (v) => {
+  let name = (v.friendly_name || v.short_name || '').replace(/^Microsoft\s*/, '')
+  name = name.replace(/\s*-\s*Chinese\s*\(Mainland\)\s*$/, '')
+  const g = v.gender === 'Female' ? '女声' : v.gender === 'Male' ? '男声' : ''
+  return g ? `${name}（${g}）` : name
+}
+
+function openTtsSettings() {
+  generateVisible.value = false
+  router.push({ path: '/settings', query: { tab: 'tts' } })
+}
 
 const femaleVoices = computed(() => voices.value.filter((v) => v.gender === 'Female'))
 const maleVoices = computed(() => voices.value.filter((v) => v.gender === 'Male'))
 const otherVoices = computed(() => voices.value.filter((v) => v.gender !== 'Female' && v.gender !== 'Male'))
 
+// 按所选引擎刷新音色列表；auto 使用 Edge TTS 音色
+function refreshGenerateVoices(preferred = '') {
+  const e = generateForm.engine === 'auto' ? 'edge-tts' : generateForm.engine
+  const list = allEngineVoices.value[e] || []
+  voices.value = list
+  if (!list.some((v) => v.short_name === generateForm.voice)) {
+    generateForm.voice = list.some((v) => v.short_name === preferred)
+      ? preferred
+      : (list[0]?.short_name || '')
+  }
+}
+watch(() => generateForm.engine, () => refreshGenerateVoices())
+
 async function loadVoices() {
   try {
     const res = await axios.get(`${API_BASE}/tts/settings`)
     const data = res.data?.data || {}
-    voices.value = data.voices || []
     const cfg = data.config || {}
+    allEngineVoices.value = data.engine_voices || (data.voices ? { 'edge-tts': data.voices } : {})
     engineOptions.value = [
       { key: 'auto', label: '自动（推荐）', desc: 'Edge TTS 优先，失败自动切换本地引擎' },
       ...(data.engines || [])
     ]
-    if (!generateForm.voice) generateForm.voice = cfg.voice || (voices.value[0] ? voices.value[0].short_name : '')
+    refreshGenerateVoices(generateForm.voice || cfg.voice || '')
     if (!generateForm.speed_factor || generateForm.speed_factor <= 0) generateForm.speed_factor = cfg.speed_factor || 1.0
   } catch (e) {
     voices.value = []
+    allEngineVoices.value = {}
     generateForm.voice = generateForm.voice || ''
   }
 }
@@ -556,6 +612,7 @@ function openGenerate(task, isRetry = false) {
     generateForm.voice = task.voice || generateForm.voice
     generateForm.speed_factor = task.speed_factor || 1.0
     generateForm.engine = task.engine || 'auto'
+    refreshGenerateVoices(task.voice || '')
   }
   generateVisible.value = true
 }
@@ -1346,23 +1403,94 @@ if (typeof window !== 'undefined') {
   color: #94a3b8;
   padding: 8px;
 }
-.engine-opt-label {
-  font-size: 14px;
+.engine-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.engine-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 68px;
+  padding: 11px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-bg-color);
   color: var(--el-text-color-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
-.engine-opt-desc {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  color: #94a3b8;
-  white-space: normal;
-  line-height: 1.4;
+.engine-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--app-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--app-primary) 4%, var(--el-bg-color));
 }
-.engine-opt-tip {
-  margin-top: 6px;
+.engine-card.active {
+  border-color: var(--app-primary);
+  background: color-mix(in srgb, var(--app-primary) 7%, var(--el-bg-color));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-primary) 14%, transparent);
+}
+.engine-card.unavailable {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--el-fill-color-lighter);
+}
+.engine-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.engine-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
   font-size: 12px;
-  line-height: 1.5;
-  color: #94a3b8;
+  font-weight: 700;
+  color: #fff;
+  background: #94a3b8;
+}
+.engine-auto .engine-mark { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+.engine-edge-tts .engine-mark { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
+.engine-xunfei .engine-mark { background: linear-gradient(135deg, #f59e0b, #fbbf24); }
+.engine-deepseek .engine-mark { background: linear-gradient(135deg, #10b981, #34d399); }
+.engine-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.engine-check {
+  margin-left: auto;
+  font-size: 15px;
+  color: var(--app-primary);
+}
+.engine-off {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+.engine-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.3;
+}
+.engine-setup,
+.engine-setup-hint {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.engine-setup .el-button {
+  height: auto;
+  padding: 0 2px;
 }
 
 /* ===== 播放弹窗 ===== */

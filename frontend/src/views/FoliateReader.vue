@@ -384,13 +384,13 @@
             <div class="fr-tts-progress">{{ ttsProgressLabel }}</div>
           </div>
 
-          <!-- 朗读引擎：云端（需联网）或浏览器离线（不依赖微软端点，受限网络可用） -->
+          <!-- 朗读引擎：后端下发的云端引擎 + 浏览器离线（不依赖云端端点） -->
           <div class="fr-tts-opt">
             <span class="fr-tts-label">引擎</span>
-            <el-radio-group v-model="tts.engine" size="small" style="flex: 1" @change="tts.setEngine">
-              <el-radio-button value="edge-tts">云端</el-radio-button>
-              <el-radio-button value="browser" :disabled="!tts.browserSupported">浏览器离线</el-radio-button>
-            </el-radio-group>
+            <el-select v-model="tts.engine" size="small" style="flex: 1" @change="tts.setEngine">
+              <el-option label="浏览器离线（本机语音）" value="browser" :disabled="!tts.browserSupported" />
+              <el-option v-for="e in tts.engines" :key="e.key" :label="e.label" :value="e.key" :disabled="!e.available" />
+            </el-select>
           </div>
 
           <!-- 音色：浏览器引擎用本机音色，云端用 Edge 在线音色 -->
@@ -417,7 +417,7 @@
             </el-select>
           </div>
 
-          <div class="fr-tts-opt" v-if="tts.engine !== 'browser'">
+          <div class="fr-tts-opt" v-if="tts.engine !== 'browser' && tts.engine !== 'deepseek'">
             <span class="fr-tts-label">语气</span>
             <el-select v-model="tts.emotion" size="small" style="flex: 1" @change="tts.restartIfPlaying()">
               <el-option v-for="em in tts.emotions" :key="em" :label="em" :value="em" />
@@ -425,12 +425,14 @@
           </div>
           <div class="fr-tts-opt">
             <span class="fr-tts-label">倍速</span>
-            <el-slider v-model="tts.speed" :min="0.5" :max="2" :step="0.1" style="flex: 1" @change="tts.restartIfPlaying()" />
+            <el-slider v-model="tts.speed" :min="0.5" :max="2" :step="0.1" style="flex: 1" :disabled="tts.engine === 'deepseek'" @change="tts.restartIfPlaying()" />
             <span class="fr-tts-speed-val">{{ tts.speed.toFixed(1) }}x</span>
           </div>
           <p class="fr-tts-tip">
-            <template v-if="tts.engine === 'browser'">使用浏览器内置语音（离线、无需联网，不依赖微软端点）；本机系统需安装中文语音包（如 Windows 语音、macOS 朗读语音）。</template>
-            <template v-else>朗读由 Edge TTS 在线合成，需联网；断点自动保存，下次打开本面板点「继续阅读」即可续播。若提示 403 / 连接失败（受限网络），可在启动后端的环境中设置 EDGE_TTS_PROXY 或 HTTPS_PROXY 经代理出网。</template>
+            <template v-if="tts.engine === 'browser'">使用浏览器内置语音（离线、无需联网）；本机系统需安装中文语音包（如 Windows 语音、macOS 朗读语音）。</template>
+            <template v-else-if="tts.engine === 'deepseek'">DeepSeek TTS 返回 WAV，不支持语速与语气调节，按字符计费；请先在「设置 → 语音合成」填写 API Key。</template>
+            <template v-else-if="tts.engine === 'xunfei'">讯飞在线 TTS 返回 MP3，按调用量计费；请先在「设置 → 语音合成」填写密钥，并在讯飞控制台开通发音人。</template>
+            <template v-else>云端合成需联网；断点自动保存，下次打开本面板点「继续阅读」即可续播。Edge TTS 在受限网络下可在服务端设置 EDGE_TTS_PROXY 或 HTTPS_PROXY 经代理出网。</template>
           </p>
         </div>
       </aside>

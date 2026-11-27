@@ -92,7 +92,8 @@ func TTSWebSocketHandler(c *gin.Context) {
 			Text    string  `json:"text"`
 			Emotion string  `json:"emotion"`
 			Speed   float64 `json:"speed_factor"`
-			Voice   string  `json:"voice"` // Edge TTS 音色 short name，空则用保存配置
+			Voice   string  `json:"voice"`  // 音色 short name，空则用保存配置
+			Engine  string  `json:"engine"` // 可选引擎覆盖（xunfei/deepseek/...），空则用保存配置
 		}
 		if err := json.Unmarshal(msg, &req); err != nil {
 			continue
@@ -110,6 +111,9 @@ func TTSWebSocketHandler(c *gin.Context) {
 		synthCfg := cfg
 		if req.Voice != "" {
 			synthCfg.Voice = req.Voice
+		}
+		if e := services.NormalizeEngine(req.Engine); e != "" {
+			synthCfg.Engine = e
 		}
 		if req.Speed > 0 {
 			synthCfg.SpeedFactor = req.Speed

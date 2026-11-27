@@ -200,6 +200,13 @@ docker run -d -p 18080:18080 -v "$(pwd)/data:/app/data" moyue-books
 | `PORT`                  | 服务监听端口                             |
 | `EDGE_TTS_PROXY`        | Edge TTS 代理地址（受限网络出网用）      |
 | `HTTPS_PROXY`           | 通用 HTTPS 代理（Edge TTS 亦可经此出网） |
+| `XF_APP_ID`             | 讯飞 TTS 应用 AppID（启用讯飞引擎必需） |
+| `XF_API_KEY` / `XF_API_SECRET` | 讯飞 TTS APIKey / APISecret（HMAC 签名鉴权） |
+| `XF_API_PASSWORD`       | 讯飞控制台 APIPassword（可选，替代上一组用于 `x-api-key` 鉴权） |
+| `XF_TTS_VOICE`          | 讯飞默认发音人（默认 `xiaoyan`，需在控制台开通） |
+| `XF_TTS_WS_URL`         | 讯飞 WebSocket 端点（默认 `wss://tts-api.xfyun.cn/v2/tts`） |
+| `DEEPSEEK_API_KEY`      | DeepSeek API Key（启用 DeepSeek TTS 必需） |
+| `DEEPSEEK_TTS_BASE_URL` | DeepSeek API 地址（可填域名或带 `/v1`，默认 `https://api.deepseek.com/v1`，最终请求 `/v1/tools/tts`） |
 | `FEEDBACK_MAIL_ACCOUNT` | 反馈邮件通道的 163 邮箱账号              |
 | `FEEDBACK_MAIL_AUTH`    | 反馈邮件通道的 163 SMTP 授权码           |
 
@@ -263,7 +270,11 @@ docker run -d -p 18080:18080 -v "$(pwd)/data:/app/data" moyue-books
 应用内置多种语音合成引擎，用于在线阅读朗读与有声书生成：
 
 - **Edge TTS（云端，免费）**：微软在线语音，无需本地模型，默认开启。后端使用 Go 原生库直连微软端点，**不依赖 Python tts-service**，并在收到 403 时依据服务端时间自动校正本地时钟偏移并重试。
+- **讯飞在线 TTS（云端，按量计费）**：WebSocket 流式接口，HMAC-SHA256 握手鉴权，返回 MP3；单次文本上限约 8000 字节，长文本由后端自动切分。在「设置 → 语音合成」填写 AppID 与 APIKey/APISecret（或 APIPassword），并在讯飞控制台开通语音合成与发音人。
+- **DeepSeek TTS（云端，按字符计费）**：`POST /v1/tools/tts` 返回 WAV，音色为 `stella`（海星）/ `tide`（暗潮）；**不支持语速与情感调节**。在「设置 → 语音合成」填写 API Key。有声书使用 DeepSeek 时分段音频为 `.wav`，其它引擎仍为 `.mp3`。
 - **GPT-SoVITS / Fish-Speech / ChatTTS（本地部署）**：声音克隆或本地模型，需在 `tts.base_url` 配置自托管服务地址。
+
+> 云端引擎凭据在「设置 → 语音合成」中按账号配置（密钥不明文回显，也不下发前端页面）；上表中的环境变量仅作为**初始值/服务端兜底**，设置页中保存的值优先。引擎列表中的「可用」状态由当前账号的凭据决定。阅读朗读与有声书均可选择引擎（切换后音色列表自动切换）。「自动」模式仅包含 Edge TTS 与已配置地址的本地引擎，不会自动调用按量计费的讯飞/DeepSeek。
 
 ### 受限网络（403）代理配置
 

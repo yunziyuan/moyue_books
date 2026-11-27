@@ -10,6 +10,10 @@
 # 所有配置项均可被同名环境变量覆盖：
 #   MB_DATA_DIR / MB_UPLOAD_DIR / MB_DB_PATH / MB_JWT_SECRET / PORT
 #
+# TTS 云端引擎凭据（仅在服务端读取，不写入配置文件；未配置则引擎列表中不可用）：
+#   讯飞：XF_APP_ID + XF_API_KEY + XF_API_SECRET（或 XF_API_PASSWORD），可选 XF_TTS_VOICE / XF_TTS_WS_URL
+#   DeepSeek：DEEPSEEK_API_KEY，可选 DEEPSEEK_TTS_BASE_URL（默认 https://api.deepseek.com/v1）
+#
 # 飞牛 fpk 目录约定（详见 README 第 5 节）：
 #   TRIM_APPDEST   程序目录（target/），单二进制 moyue-server
 #   TRIM_PKGVAR    运行时数据目录（var/），数据库/JWT 密钥默认存放于此，卸载保留

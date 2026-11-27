@@ -93,6 +93,7 @@ func isTTSServerThrottleError(err error) bool {
 	for _, k := range []string{
 		"too many request", "rate limit", "ratelimit", "throttl",
 		"quota", "busy", "overload", "unavailable", "限流",
+		"11201", "11202", "11203", // 讯飞：日流控/秒级流控/并发流控超限
 		"429", "502", "503", "504",
 	} {
 		if strings.Contains(msg, k) {
@@ -546,10 +547,23 @@ func isTOCSection(title, text string) bool {
 	return looksLikeInlineTOC(text)
 }
 
+// AudiobookSegmentExt 按合成引擎返回分段音频扩展名。
+// DeepSeek TTS 仅支持 WAV（format=wav），其余引擎均为 MP3 帧流。
+func AudiobookSegmentExt(engine string) string {
+	if NormalizeEngine(engine) == EngineDeepSeek {
+		return "wav"
+	}
+	return "mp3"
+}
+
 // BuildAudiobookSegments 从图书提取全文并分段（生成音频前调用）。
 // speed 为朗读语速系数，用于按 Edge TTS 单次合成时长上限动态压缩单段字符数；
 // 返回的分段包含标题、文本与字符数；音频文件字段按段序号命名。
-func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentInfo, error) {
+// ext 为分段音频扩展名（mp3/wav）：DeepSeek 仅返回 WAV，其余引擎为 MP3。
+func BuildAudiobookSegments(book *models.Book, speed float64, ext string) ([]models.SegmentInfo, error) {
+	if ext != "wav" {
+		ext = "mp3"
+	}
 	filePath := utils.ResolvePath(book.FilePath)
 	ft := strings.ToLower(book.FileType)
 	maxChars := AudiobookMaxCharsFor(speed)
@@ -571,7 +585,7 @@ func BuildAudiobookSegments(book *models.Book, speed float64) ([]models.SegmentI
 			segs = append(segs, models.SegmentInfo{
 				Index:      len(segs) + 1,
 				Title:      title + suffix,
-				File:       fmt.Sprintf("segment_%04d.mp3", len(segs)+1),
+				File:       fmt.Sprintf("segment_%04d.%s", len(segs)+1, ext),
 				Text:       c, // 完整文本，TTS 合成直接使用；前端展示时自行截断
 				CharCount:  len([]rune(c)),
 				ChapterIdx: chapterIdx,
@@ -923,15 +937,21 @@ func runAudiobookGeneration(taskID uint) {
 	// 分段：优先复用已生成过的元数据（断点续传），否则重新构建
 	segs := LoadAudiobookSegments(dir)
 	if len(segs) == 0 {
-		// 分段策略升级/首次构建：清理旧音频文件，避免分段结构变化后续传错位
-		if olds, _ := filepath.Glob(filepath.Join(dir, "segment_*.mp3")); len(olds) > 0 {
-			for _, f := range olds {
-				os.Remove(f)
+		// 分段策略升级/首次构建：清理旧音频文件，避免分段结构变化或引擎切换（mp3/wav）后续传错位
+		cleaned := 0
+		for _, pattern := range []string{"segment_*.mp3", "segment_*.wav"} {
+			if olds, _ := filepath.Glob(filepath.Join(dir, pattern)); len(olds) > 0 {
+				for _, f := range olds {
+					os.Remove(f)
+				}
+				cleaned += len(olds)
 			}
-			log.Printf("audiobook: task %d 分段结构已更新，清理 %d 个旧音频", taskID, len(olds))
+		}
+		if cleaned > 0 {
+			log.Printf("audiobook: task %d 分段结构已更新，清理 %d 个旧音频", taskID, cleaned)
 		}
 		var err error
-		segs, err = BuildAudiobookSegments(&book, cfg.SpeedFactor)
+		segs, err = BuildAudiobookSegments(&book, cfg.SpeedFactor, AudiobookSegmentExt(cfg.Engine))
 		if err != nil {
 			finishAudiobookTask(&task, "failed", err.Error())
 			return
@@ -980,8 +1000,8 @@ func runAudiobookGeneration(taskID uint) {
 
 	processSegment := func(i int) {
 		seg := &segs[i]
-		mp3Path := filepath.Join(dir, seg.File)
-		if seg.Done && fileExists(mp3Path) {
+		audioPath := filepath.Join(dir, seg.File)
+		if seg.Done && fileExists(audioPath) {
 			return
 		}
 
@@ -996,7 +1016,8 @@ func runAudiobookGeneration(taskID uint) {
 			if err != nil {
 				// Edge TTS 单次合成有 10 分钟时长硬上限；命中"音频超长"类错误时，
 				// 将本段按句拆半分别合成后拼接（分段已按语速压缩，此为兜底）
-				if isEdgeTTSTooLongError(err) {
+				// WAV（DeepSeek）带 RIFF 头不能按字节拼接，超出上限时直接走重试。
+				if isEdgeTTSTooLongError(err) && AudiobookSegmentExt(cfg.Engine) == "mp3" {
 					if d2, e2 := synthesizeSplitHalf(cfg, seg.Text); e2 == nil {
 						d, err = d2, nil
 						log.Printf("audiobook: task %d segment %d 音频超长，拆半重试成功", taskID, seg.Index)
@@ -1059,7 +1080,7 @@ func runAudiobookGeneration(taskID uint) {
 			mu.Unlock()
 			return
 		}
-		if err := os.WriteFile(mp3Path, data, 0644); err != nil {
+		if err := os.WriteFile(audioPath, data, 0644); err != nil {
 			log.Printf("audiobook: task %d write failed: %v", taskID, err)
 			mu.Lock()
 			stop = true

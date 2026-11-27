@@ -60,11 +60,15 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
   const speed = ref(1.0)
   const emotion = ref('平静')
   const emotions = ref(['平静'])
-  const voices = ref([])
-  const voice = ref('zh-CN-XiaoxiaoNeural') // Edge TTS 音色 short name
+  const voices = ref([]) // 当前引擎可用音色（由 allVoices 按引擎过滤）
+  const allVoices = ref([])
+  const engineVoices = ref({})
+  const voice = ref('zh-CN-XiaoxiaoNeural') // 音色 short name（按引擎区分）
   const engines = ref([
     { key: 'edge-tts', label: 'Edge TTS（在线，免费）', desc: '微软在线语音，无需本地模型，需联网。情感/语速为近似模拟。', available: true, default: true },
-    { key: 'chattts', label: 'ChatTTS（本地模型）', desc: '本地 ChatTTS 模型合成，支持参考音色、固定音色种子与语速控制。需安装 ChatTTS 并下载模型。', available: true, default: false }
+    { key: 'xunfei', label: '讯飞在线 TTS', desc: '讯飞流式合成，返回 MP3；需在设置中配置密钥。', available: true, default: false },
+    { key: 'deepseek', label: 'DeepSeek TTS', desc: 'DeepSeek 合成，返回 WAV；需在设置中配置 API Key，不支持语速调节。', available: true, default: false },
+    { key: 'chattts', label: 'ChatTTS（本地模型）', desc: '本地 ChatTTS 模型合成，需安装 ChatTTS 并下载模型。', available: true, default: false }
   ])
   const config = ref({
     engine: 'edge-tts',
@@ -206,7 +210,8 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
         text: sentences.value[i],
         emotion: emotion.value,
         speed_factor: speed.value,
-        voice: voice.value
+        voice: voice.value,
+        engine: engine.value === 'browser' ? '' : engine.value
       }))
     }))
   }
@@ -221,7 +226,8 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
           emotion: emotion.value,
           speed_factor: speed.value,
           media_type: 'wav',
-          voice: voice.value
+          voice: voice.value,
+          engine: engine.value === 'browser' ? '' : engine.value
         }).then(resp => new Blob([resp.data], { type: resp.headers['content-type'] || 'audio/wav' }))
       })
   }
@@ -520,6 +526,16 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
   }
 
   // ===== 设置 =====
+  // 按当前引擎过滤音色：后端下发 engine_voices 时优先使用，否则用旧版 voices 兼容
+  const refreshVoicesForEngine = () => {
+    const map = engineVoices.value || {}
+    const e = engine.value
+    voices.value = map[e] || (allVoices.value || []).filter((v) => !v.engine || v.engine === e)
+    if (voices.value.length && !voices.value.some((v) => v.short_name === voice.value)) {
+      voice.value = voices.value[0].short_name
+    }
+  }
+
   const loadSettings = async () => {
     // 引擎偏好优先取本地保存（即使离线也能用浏览器引擎）
     const savedPrefs = loadReaderPrefs()
@@ -540,17 +556,17 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
       }
       if (data?.data?.emotions?.length) emotions.value = data.data.emotions
       if (data?.data?.engines?.length) engines.value = data.data.engines
-      if (data?.data?.voices?.length) {
-        voices.value = data.data.voices
-        if (!voice.value && voices.value.length) voice.value = voices.value[0].short_name
-      } else {
-        // 音色列表加载失败（离线/网络），仍保留默认晓晓
-        voices.value = [{ short_name: voice.value, friendly_name: '晓晓（默认）', gender: 'Female' }]
-      }
+      allVoices.value = data?.data?.voices?.length ? data.data.voices : []
+      engineVoices.value = data?.data?.engine_voices || {}
       // 音色偏好优先取本地保存值（Go 后端不保存朗读配置），其次用默认配置
       const savedVoice = savedPrefs.ttsVoice
       if (savedVoice) voice.value = savedVoice
       else if (data?.data?.config?.voice) voice.value = data.data.config.voice
+      refreshVoicesForEngine()
+      if (!allVoices.value.length && !voices.value.length) {
+        // 音色列表加载失败（离线/网络），仍保留默认晓晓
+        voices.value = [{ short_name: voice.value, friendly_name: '晓晓（默认）', gender: 'Female' }]
+      }
       // 本地未保存引擎偏好且不支持浏览器时，回退到后端默认引擎
       if (!savedPrefs.ttsEngine && !browserSupported && data?.data?.config?.engine) engine.value = data.data.config.engine
     } catch (e) {
@@ -566,7 +582,8 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
     if (e === 'browser') {
       loadBrowserVoices()
     } else {
-      // 切到云端时确保音色/语气/语速等配置已加载（失败则静默保留默认）
+      // 切到云端时按新引擎过滤音色，并确保语气/语速等配置已加载
+      refreshVoicesForEngine()
       loadSettings()
     }
     if (active.value && index.value >= 0) restartIfPlaying()
@@ -598,11 +615,11 @@ export function useTtsPlayer({ onSentence, onEnd } = {}) {
   return {
     // 状态
     active, playing, paused, loading, index, sentences, currentText,
-    speed, emotion, emotions, voices, voice, engines, config,
+    speed, emotion, emotions, voices, allVoices, engineVoices, voice, engines, config,
     engine, browserVoices, browserVoiceURI, browserSupported,
     // 方法
     start, setSentences, stop, togglePlay, prev, next,
     loadSettings, onVoiceChange, restartIfPlaying, voiceLabel,
-    setEngine, onBrowserVoiceChange
+    setEngine, onBrowserVoiceChange, refreshVoicesForEngine
   }
 }

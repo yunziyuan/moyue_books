@@ -28,6 +28,13 @@ const (
 	TTSSettingEngine         = "tts.engine"
 	TTSSettingReferenceID    = "tts.reference_id"
 	TTSSettingVoice          = "tts.voice" // Edge TTS 音色 short name
+	// 云端引擎凭据：按用户存 Setting 表，前端设置页可修改；环境变量作为初始值/兜底
+	TTSSettingXfAppID       = "tts.xf.app_id"
+	TTSSettingXfAPIKey      = "tts.xf.api_key"
+	TTSSettingXfAPISecret   = "tts.xf.api_secret"
+	TTSSettingXfAPIPassword = "tts.xf.api_password"
+	TTSSettingDeepSeekKey   = "tts.deepseek.api_key"
+	TTSSettingDeepSeekURL   = "tts.deepseek.base_url"
 )
 
 // 支持的语音引擎
@@ -36,6 +43,8 @@ const (
 	EngineGPTSovits  = "gpt-sovits"
 	EngineFishSpeech = "fish-speech"
 	EngineChatTTS    = "chattts"
+	EngineXunfei     = "xunfei"
+	EngineDeepSeek   = "deepseek"
 	EngineAuto       = "auto"
 )
 
@@ -61,6 +70,7 @@ func EmotionList() []string {
 }
 
 // TTSConfig 语音引擎连接配置
+// 云端引擎凭据在设置页按用户保存（环境变量为初始值/兜底）；本地引擎仍使用 BaseURL。
 type TTSConfig struct {
 	BaseURL        string  `json:"base_url"`
 	RefAudioPath   string  `json:"ref_audio_path"`
@@ -69,20 +79,54 @@ type TTSConfig struct {
 	TextLang       string  `json:"text_lang"`
 	SpeedFactor    float64 `json:"speed_factor"`
 	EmotionEnabled bool    `json:"emotion_enabled"`
-	// Engine 语音工具：""/"auto"=自动、edge-tts、gpt-sovits、fish-speech、chattts
+	// Engine 语音工具：""/"auto"=自动、edge-tts、gpt-sovits、fish-speech、chattts、xunfei、deepseek
 	Engine      string `json:"engine"`
 	ReferenceID string `json:"reference_id"` // fish-speech 预置音色 ID / ChatTTS 固定音色种子
-	// Voice Edge TTS 音色 short name（如 zh-CN-XiaoxiaoNeural）
+	// Voice 音色 short name：edge-tts 如 zh-CN-XiaoxiaoNeural、xunfei 如 xiaoyan、deepseek 如 stella
 	Voice string `json:"voice"`
+
+	// 云端凭据：仅服务端内部使用，禁止序列化下发前端
+	XfAppID        string `json:"-"`
+	XfAPIKey       string `json:"-"`
+	XfAPISecret    string `json:"-"`
+	XfAPIPassword  string `json:"-"`
+	DeepSeekAPIKey string `json:"-"`
+	DeepSeekBase   string `json:"-"`
 }
 
-// TTSEngines 提供给前端的可选语音引擎列表
-func TTSEngines() []map[string]interface{} {
+// TTSEngines 提供给前端的可选语音引擎列表。云端引擎仅在该用户已配置凭据时标记为可用。
+func TTSEngines(uid uint) []map[string]interface{} {
+	cfg := GetTTSConfig(uid)
+	xfReady := cfg.XfAppID != "" && ((cfg.XfAPIKey != "" && cfg.XfAPISecret != "") || cfg.XfAPIPassword != "")
+	dsReady := cfg.DeepSeekAPIKey != ""
 	return []map[string]interface{}{
 		{"key": EngineEdgeTTS, "label": "Edge TTS（在线，免费）", "desc": "微软在线语音，Go 直连无需本地服务；受限网络请设 EDGE_TTS_PROXY/HTTPS_PROXY 代理出网。情感/语速为近似模拟。", "available": true, "default": true},
+		{"key": EngineXunfei, "label": "讯飞在线 TTS", "desc": "讯飞流式合成，返回 MP3；需在「设置 → 语音合成」填写 AppID 与 APIKey/APISecret（或 APIPassword），并在控制台开通发音人。按量计费。", "available": xfReady, "default": false},
+		{"key": EngineDeepSeek, "label": "DeepSeek TTS", "desc": "DeepSeek 合成，返回 WAV；需在「设置 → 语音合成」填写 API Key。不支持语速与情感，按字符计费。", "available": dsReady, "default": false},
 		// {"key": EngineGPTSovits, "label": "GPT-SoVITS（声音克隆）", "desc": "官方 api_v2 服务，参考音频克隆音色，需本地部署模型。", "available": true, "default": false},
 		// {"key": EngineFishSpeech, "label": "Fish-Speech（声音克隆）", "desc": "官方 API server，支持预置音色 reference_id 或参考音频克隆。", "available": true, "default": false},
 		// {"key": EngineChatTTS, "label": "ChatTTS（本地模型）", "desc": "本地 ChatTTS 模型合成，支持参考音色、固定音色种子与语速控制。需安装 ChatTTS 并下载模型。", "available": true, "default": false},
+	}
+}
+
+// TTSEngineVoices 按引擎返回可选音色，供前端在选择引擎后过滤音色下拉框。
+func TTSEngineVoices() map[string][]interface{} {
+	edge := make([]interface{}, 0)
+	for _, v := range ListEdgeTTSVoices() {
+		edge = append(edge, v)
+	}
+	xf := make([]interface{}, 0, len(XunfeiVoices()))
+	for _, v := range XunfeiVoices() {
+		xf = append(xf, v)
+	}
+	ds := make([]interface{}, 0, len(DeepSeekVoices()))
+	for _, v := range DeepSeekVoices() {
+		ds = append(ds, v)
+	}
+	return map[string][]interface{}{
+		EngineEdgeTTS:  edge,
+		EngineXunfei:   xf,
+		EngineDeepSeek: ds,
 	}
 }
 
@@ -114,6 +158,13 @@ func GetTTSConfig(uid uint) TTSConfig {
 		Engine:         getSetting(uid, TTSSettingEngine, EngineEdgeTTS),
 		ReferenceID:    getSetting(uid, TTSSettingReferenceID, ""),
 		Voice:          getSetting(uid, TTSSettingVoice, EdgeTTSDefaultVoiceShort),
+		// 云端凭据：用户设置优先，未配置时回退环境变量
+		XfAppID:        strings.TrimSpace(getSetting(uid, TTSSettingXfAppID, os.Getenv("XF_APP_ID"))),
+		XfAPIKey:       strings.TrimSpace(getSetting(uid, TTSSettingXfAPIKey, os.Getenv("XF_API_KEY"))),
+		XfAPISecret:    strings.TrimSpace(getSetting(uid, TTSSettingXfAPISecret, os.Getenv("XF_API_SECRET"))),
+		XfAPIPassword:  strings.TrimSpace(getSetting(uid, TTSSettingXfAPIPassword, os.Getenv("XF_API_PASSWORD"))),
+		DeepSeekAPIKey: strings.TrimSpace(getSetting(uid, TTSSettingDeepSeekKey, os.Getenv("DEEPSEEK_API_KEY"))),
+		DeepSeekBase:   strings.TrimSpace(getSetting(uid, TTSSettingDeepSeekURL, os.Getenv("DEEPSEEK_TTS_BASE_URL"))),
 	}
 }
 
@@ -130,7 +181,7 @@ func DefaultTTSConfig() TTSConfig {
 // NormalizeEngine 归一化引擎名，未设置时返回空（保持旧行为）
 func NormalizeEngine(e string) string {
 	switch e {
-	case EngineEdgeTTS, EngineGPTSovits, EngineFishSpeech, EngineChatTTS, EngineAuto:
+	case EngineEdgeTTS, EngineGPTSovits, EngineFishSpeech, EngineChatTTS, EngineXunfei, EngineDeepSeek, EngineAuto:
 		return e
 	case "edge", "edge_tts":
 		return EngineEdgeTTS
@@ -140,6 +191,10 @@ func NormalizeEngine(e string) string {
 		return EngineFishSpeech
 	case "chat", "chat_tts":
 		return EngineChatTTS
+	case "xf", "xfyun", "xunfei_tts":
+		return EngineXunfei
+	case "deepseek_tts":
+		return EngineDeepSeek
 	default:
 		return ""
 	}
@@ -212,15 +267,16 @@ func SynthesizeWithConfig(cfg TTSConfig, text, emotion string, speedFactor float
 
 // synthesizeWithEngine 使用单一指定引擎合成（不含 auto 链，链式回退由 SynthesizeWithConfig 负责）
 func synthesizeWithEngine(cfg TTSConfig, engine, text, emotion string, speedFactor float64, textLang, mediaType string) ([]byte, string, error) {
-	// edge-tts 由 Go/Python 直连微软在线合成，无需本地语音服务地址；其他引擎需要 base_url
-	if engine != EngineEdgeTTS && cfg.BaseURL == "" {
+	// edge-tts 与讯飞/DeepSeek 均为云端引擎，无需本地服务地址；仅本地引擎需要 base_url
+	if engine != EngineEdgeTTS && engine != EngineXunfei && engine != EngineDeepSeek && cfg.BaseURL == "" {
 		return nil, "", fmt.Errorf("语音引擎 %s 未配置服务地址", engine)
 	}
 
 	// 情感控制：将情感描述注入合成文本（本地引擎对括号情感标注有语义感知）。
-	// edge-tts 会把「（平静地）」等括号内容原样朗读出来，因此不注入。
+	// edge-tts / 讯飞 / DeepSeek 会把「（平静地）」等括号内容原样朗读出来，因此不注入。
 	finalText := text
-	if cfg.EmotionEnabled && emotion != "" && engine != EngineEdgeTTS {
+	if cfg.EmotionEnabled && emotion != "" && engine != EngineEdgeTTS &&
+		engine != EngineXunfei && engine != EngineDeepSeek {
 		if preset, ok := EmotionPresets[emotion]; ok {
 			finalText = preset + text
 		} else {
@@ -248,6 +304,10 @@ func synthesizeWithEngine(cfg TTSConfig, engine, text, emotion string, speedFact
 		return synthesizeLegacy(cfg, finalText, textLang, mediaType, speedFactor, EngineChatTTS)
 	case EngineGPTSovits:
 		return synthesizeLegacy(cfg, finalText, textLang, mediaType, speedFactor, "")
+	case EngineXunfei:
+		return synthesizeXunfei(cfg, text, speedFactor)
+	case EngineDeepSeek:
+		return synthesizeDeepSeek(cfg, text)
 	case EngineEdgeTTS:
 		// 优先使用 Go 直连 difyz9/edge-tts-go：该库在收到 403 时会依据服务端
 		// Date 头自动校正本地时钟偏移并重试，规避旧 Python 中转偶发的 403/bad

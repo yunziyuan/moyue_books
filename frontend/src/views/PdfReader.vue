@@ -454,6 +454,8 @@ const ttsVoices = ref([])
 const ttsVoice = ref('zh-CN-XiaoxiaoNeural') // Edge TTS 音色 short name
 const ttsEngines = ref([
   { key: 'edge-tts', label: 'Edge TTS（在线，免费）', desc: '微软在线语音，无需本地模型，需联网。情感/语速为近似模拟。', available: true, default: true },
+  { key: 'xunfei', label: '讯飞在线 TTS', desc: '讯飞流式合成，返回 MP3；需服务端配置讯飞密钥。', available: true, default: false },
+  { key: 'deepseek', label: 'DeepSeek TTS', desc: 'DeepSeek 语音合成，返回 WAV；不支持语速调节。', available: true, default: false },
   { key: 'gpt-sovits', label: 'GPT-SoVITS（声音克隆）', desc: '官方 api_v2 服务，参考音频克隆音色，需本地部署模型。', available: true, default: false },
   { key: 'fish-speech', label: 'Fish-Speech（声音克隆）', desc: '官方 API server，支持预置音色 reference_id 或参考音频克隆。', available: true, default: false },
   { key: 'chattts', label: 'ChatTTS（本地模型）', desc: '本地 ChatTTS 模型合成，支持参考音色、固定音色种子与语速控制。需安装 ChatTTS 并下载模型。', available: true, default: false }
@@ -493,17 +495,18 @@ const loadTtsSettings = async () => {
     }
     if (data?.data?.emotions?.length) ttsEmotions.value = data.data.emotions
     if (data?.data?.engines?.length) ttsEngines.value = data.data.engines
-    if (data?.data?.voices?.length) {
-      ttsVoices.value = data.data.voices
-      if (!ttsVoice.value && ttsVoices.value.length) ttsVoice.value = ttsVoices.value[0].short_name
-    } else {
-      // 音色列表加载失败（离线/网络），仍保留默认晓晓
-      ttsVoices.value = [{ short_name: ttsVoice.value, friendly_name: '晓晓（默认）', gender: 'Female' }]
-    }
+    // 音色按当前引擎过滤（兼容旧版接口：voices 全部为 Edge 音色）
+    const engine = ttsConfig.value.engine || 'edge-tts'
+    const map = data?.data?.engine_voices || {}
+    const list = map[engine] || (data?.data?.voices || []).filter((v) => !v.engine || v.engine === engine)
+    ttsVoices.value = list.length
+      ? list
+      : [{ short_name: ttsVoice.value, friendly_name: '晓晓（默认）', gender: 'Female' }]
     // 音色偏好优先取本地保存值（Go 后端不保存朗读配置），其次用默认配置
     const savedVoice = loadReaderPrefs().ttsVoice
-    if (savedVoice) ttsVoice.value = savedVoice
-    else if (data?.data?.config?.voice) ttsVoice.value = data.data.config.voice
+    if (savedVoice && ttsVoices.value.some((v) => v.short_name === savedVoice)) ttsVoice.value = savedVoice
+    else if (data?.data?.config?.voice && ttsVoices.value.some((v) => v.short_name === data.data.config.voice)) ttsVoice.value = data.data.config.voice
+    else if (ttsVoices.value.length) ttsVoice.value = ttsVoices.value[0].short_name
   } catch (e) {
     // 静默失败，使用默认配置
   }

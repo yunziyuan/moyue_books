@@ -39,6 +39,7 @@
 import { ref, computed, markRaw, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingPrefs from './settings/ReadingPrefs.vue'
+import TtsSettings from './settings/TtsSettings.vue'
 import AccountSettings from './settings/AccountSettings.vue'
 import Appearance from './settings/Appearance.vue'
 import Feedback from './settings/Feedback.vue'
@@ -63,6 +64,13 @@ const allSections = [
     desc: '主题 · 字体 · 排版',
     icon: 'Reading',
     component: markRaw(ReadingPrefs)
+  },
+  {
+    key: 'tts',
+    label: '语音合成',
+    desc: '讯飞 · DeepSeek 密钥',
+    icon: 'Service',
+    component: markRaw(TtsSettings)
   },
   {
     key: 'account',

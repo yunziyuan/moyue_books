@@ -11,6 +11,12 @@ services:
       # 受限网络下 Edge TTS 代理出网（二选一）
       # EDGE_TTS_PROXY: "http://host.docker.internal:7890"
       # HTTPS_PROXY: "http://host.docker.internal:7890"
+      # 讯飞在线 TTS（按量计费；也可只配 XF_API_PASSWORD 替代 APIKey/APISecret）
+      # XF_APP_ID: "your_app_id"
+      # XF_API_KEY: "your_api_key"
+      # XF_API_SECRET: "your_api_secret"
+      # DeepSeek TTS（按字符计费）
+      # DEEPSEEK_API_KEY: "sk-xxxxxxxx"
       # 问题反馈邮件通道（未配置则自动禁用）
       # FEEDBACK_MAIL_ACCOUNT: "yourname@163.com"
       # FEEDBACK_MAIL_AUTH: "your_smtp_auth_code"

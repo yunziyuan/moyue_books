@@ -40,6 +40,16 @@ import { APP_VERSION } from '@/utils/version'
 // 版本升级说明（更新时请在最上方追加新版本条目，并保持与 fnos/moyue/manifest 版本一致）
 const releaseNotes = [
   {
+    version: '1.0.5',
+    date: '2026-11-27',
+    changes: [
+      '优化阅读页面的排版与交互体验',
+      '新增deepseek和讯飞TTS引擎',
+      '新增有声书字幕功能',
+      '修复若干已知问题'
+    ]
+  },
+  {
     version: '1.0.4',
     date: '2026-11',
     changes: [

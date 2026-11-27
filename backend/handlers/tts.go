@@ -19,13 +19,15 @@ import (
 
 // GetTTSSettings 获取语音朗读可选项（引擎/情感/音色）。Go 后端直连 Edge TTS，无需用户配置。
 func GetTTSSettings(c *gin.Context) {
+	voicesByEngine := services.TTSEngineVoices()
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"config":          services.DefaultTTSConfig(),
 			"emotions":        services.EmotionList(),
-			"engines":         services.TTSEngines(),
+			"engines":         services.TTSEngines(middleware.CurrentUserID(c)),
 			"available_langs": []string{"zh", "en", "ja", "ko", "yue", "auto"},
-			"voices":          services.ListEdgeTTSVoices(),
+			"voices":          voicesByEngine[services.EngineEdgeTTS],
+			"engine_voices":   voicesByEngine,
 		},
 	})
 }

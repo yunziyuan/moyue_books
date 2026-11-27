@@ -190,7 +190,7 @@ func CreateAudiobook(c *gin.Context) {
 	// 同步构建分段元数据：前端能立即拿到总段数（PDF 提取全文可能耗时数秒）
 	segs := services.LoadAudiobookSegments(dir)
 	if len(segs) == 0 {
-		segs, err = services.BuildAudiobookSegments(&book, speed)
+		segs, err = services.BuildAudiobookSegments(&book, speed, services.AudiobookSegmentExt(engine))
 		if err != nil {
 			task.Status = "failed"
 			task.Error = err.Error()
