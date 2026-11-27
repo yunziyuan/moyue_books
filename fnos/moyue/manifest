@@ -4,7 +4,7 @@
 # 应用唯一标识：与 fpk 目录名一致，安装后不可修改
 appname               = moyue
 # 版本号（三段式）：升级时递增，须大于已安装版本
-version               = 1.0.4
+version               = 1.0.5
 # 应用中心显示的名称
 display_name          = 墨阅书屋
 # 应用描述（支持 HTML 富文本）
@@ -33,4 +33,4 @@ ctl_stop              = true
 desktop_uidir         = ui
 desktop_applaunchname = moyue.Application
 # 更新日志（升级时同步更新，应用中心展示）
-changelog             = 1.0.4: 1. 优化移动端显示及分页获取 2. 新增安卓端apk应用 3.新增书架使用习惯 4.新增重复书籍检测与清理功能
+changelog             = 1.0.5: 1. 优化阅读页面的排版与交互体验 2. 新增deepseek和讯飞TTS引擎 3. 新增有声书字幕功能 4. 修复若干已知问题
