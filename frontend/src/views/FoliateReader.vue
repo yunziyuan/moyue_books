@@ -153,7 +153,15 @@
                 >A</button>
               </div>
             </div>
-            <!-- 翻页方式已固定为连续滚动（多 iframe 堆叠），不再提供分页选项 -->
+            <!-- 桌面端双栏排版：切换后仅支持点击左右热区翻页（滚轮/触摸滚动禁用） -->
+            <div v-if="!isMobile" class="fr-setting-row">
+              <span>排版</span>
+              <el-radio-group v-model="epubTwoPage" size="small">
+                <el-radio-button :value="false">单栏滚动</el-radio-button>
+                <el-radio-button :value="true">双栏翻页</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div v-if="!isMobile && epubTwoPage" class="fr-setting-tip">整本书连续排为左右书页，点击页面左右两侧即可翻书，不再滚动</div>
             <div class="fr-setting-row">
               <span>两端对齐</span>
               <el-switch v-model="justify" />
@@ -185,14 +193,30 @@
         v-show="false"
         ref="hiddenFoliate"
       />
-      <!-- 连续滚动阅读器（自建多 iframe 堆叠，章节连续滚动，无缝翻页） -->
+      <!-- 连续滚动阅读器（默认模式） -->
       <ScrollContinuousReader
-        v-if="continuousReady && !isPdf"
+        v-if="continuousReady && !isPdf && !desktopTwoPage"
         ref="continuousReaderRef"
         class="continuous-host"
         :sections="continuousSections"
         :font-css="continuousFontCss"
         :select-mode="selectMode"
+        :annotations="annotations"
+        :initial-index="continuousInitial.index"
+        :initial-fraction="continuousInitial.fraction"
+        @progress="onContinuousProgress"
+        @ready="onContinuousReady"
+        @selection="onContinuousSelection"
+        @selection-clear="onContinuousSelectionClear"
+        @annotation-click="onContinuousAnnClick"
+      />
+      <!-- 桌面双栏翻书：整本书连续排版为书页，左右页相邻，点击翻页 -->
+      <BookSpreadReader
+        v-else-if="continuousReady && !isPdf && desktopTwoPage"
+        ref="bookReaderRef"
+        class="continuous-host"
+        :sections="continuousSections"
+        :font-css="continuousFontCss"
         :annotations="annotations"
         :initial-index="continuousInitial.index"
         :initial-fraction="continuousInitial.fraction"
@@ -423,6 +447,7 @@ import 'foliate-js/view.js' // 注册 <foliate-view> 自定义元素（用于隐
 
 import PdfReader from './PdfReader.vue'
 import ScrollContinuousReader from './ScrollContinuousReader.vue'
+import BookSpreadReader from './BookSpreadReader.vue'
 
 import { bookApi } from '@/api/book'
 import { notifyProgressUpdate } from '@/utils/progressSync'
@@ -443,6 +468,8 @@ const router = useRouter()
 const rootEl = ref(null)
 const hiddenFoliate = ref(null) // 隐藏的 foliate-view，仅用于解析书籍（拿到 sections/toc）
 const continuousReaderRef = ref(null) // ScrollContinuousReader 实例引用
+const bookReaderRef = ref(null)       // 桌面双栏翻书阅读器实例引用
+function activeReader() { return desktopTwoPage.value ? bookReaderRef.value : continuousReaderRef.value }
 
 const loading = ref(true)
 const errorMsg = ref('')
@@ -495,7 +522,7 @@ const selectMode = computed(() => isMobile.value && (drawToolActive.value || not
 const DRAW_CURSOR = 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2724%27 height=%2724%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z%27 fill=%27white%27 stroke=%27black%27 stroke-width=%271.2%27/%3E%3C/svg%3E") 3 21, crosshair'
 
 function applyDrawCursor() {
-  continuousReaderRef.value?.setCursor?.(drawToolActive.value ? DRAW_CURSOR : '')
+  activeReader()?.setCursor?.(drawToolActive.value ? DRAW_CURSOR : '')
 }
 
 function setTool(tool) {
@@ -646,6 +673,23 @@ if (!stored._foliFlowMigrated) {
 // 全设备统一滚动模式（滚动即翻页）；手机端强制滚动（忽略存储偏好）
 const flow = ref(isMobile.value ? 'scrolled' : (stored.foliFlow || 'scrolled'))
 const justify = ref(stored.foliJustify ?? true)
+// 桌面端双栏翻页：双栏排版 + 禁用滚轮/触摸滚动，只能通过点击左右热区翻页。
+// 沿用 readerPrefs 中预留的 epubTwoPage 键持久化；手机端始终回到单栏滚动。
+const epubTwoPage = ref(!!stored.epubTwoPage)
+const desktopTwoPage = computed(() => !isMobile.value && !isPdf.value && epubTwoPage.value)
+
+watch(epubTwoPage, () => {
+  if (isMobile.value) return
+  persistPrefs()
+})
+
+// 版式切换时把当前阅读位置带给新阅读器，避免跳回打开书籍时的位置
+watch(desktopTwoPage, (enabled, was) => {
+  if (!continuousReady.value || isPdf.value || enabled === was) return
+  const reader = was ? bookReaderRef.value : continuousReaderRef.value
+  const p = reader?.getProgress?.()
+  if (p) continuousInitial.value = { index: p.index, fraction: p.fraction }
+}, { flush: 'sync' })
 
 // 把当前主题色作为 CSS 变量挂到根节点，让 ScrollContinuousReader 的纸张/页面背景跟随主题
 const readerRootStyle = computed(() => {
@@ -664,7 +708,8 @@ function persistPrefs() {
     theme: theme.value,
     fontFamily: fontFamily.value,
     foliFlow: flow.value,
-    foliJustify: justify.value
+    foliJustify: justify.value,
+    epubTwoPage: epubTwoPage.value
   })
   saveReaderPrefs(stored)
 }
@@ -845,9 +890,10 @@ async function openBook() {
         console.warn('恢复进度失败:', e)
       }
     }
-    // 启动连续滚动阅读器
+    // 启动阅读器：先用恢复出的位置点亮进度条，避免阅读器就绪前显示 0%
     continuousSections.value = sections
     continuousInitial.value = { index: initialIndex, fraction: initialFraction }
+    progress.value = anchorPercent(initialIndex, initialFraction)
     continuousReady.value = true
     loading.value = false
   } catch (e) {
@@ -958,15 +1004,19 @@ function onPageHide() {
   clearTimeout(saveTimer)
   saveTimer = null
   if (!continuousReady.value) return
-  const p = continuousReaderRef.value?.getProgress?.() || latestAnchor
-  if (p) progressWriter.flushKeepalive(buildProgressPayload(p.index, p.fraction))
+  const p = activeReader()?.getProgress?.() || latestAnchor
+  if (p) {
+    try { localStorage.setItem(`foli_loc_${props.id}`, JSON.stringify({ i: p.index, f: p.fraction })) } catch {}
+    latestAnchor = { index: p.index, fraction: p.fraction }
+    progressWriter.flushKeepalive(buildProgressPayload(p.index, p.fraction))
+  }
 }
 async function flushSave() {
   clearTimeout(saveTimer)
   saveTimer = null
   // 阅读器尚未就绪时不要写 0%，否则会把后端已有的真实进度覆盖掉
   if (continuousReady.value) {
-    const p = continuousReaderRef.value?.getProgress?.() || latestAnchor
+    const p = activeReader()?.getProgress?.() || latestAnchor
     if (p) await doSave(p.index, p.fraction)
   }
   await progressWriter.flush()
@@ -999,24 +1049,20 @@ async function goToHref(href) {
   try {
     const resolved = await v.resolveNavigation(href)
     if (resolved && typeof resolved.index === 'number') {
-      continuousReaderRef.value?.scrollToSection?.(resolved.index)
+      activeReader()?.scrollToSection?.(resolved.index)
     }
   } catch (e) { console.warn('goToHref failed', e) }
   showToc.value = false
 }
 function prevPage() {
   if (isPdf.value) { pdfRef.value?.prevPage(); return }
-  // 滚动模式：翻一屏（更贴合"左右翻页"的语义，跳整章太突兀）
-  if (continuousReaderRef.value?.pageFlip) {
-    continuousReaderRef.value.pageFlip(-1)
-  }
+  // 双栏翻书：整页翻回；单栏滚动：向上翻一屏
+  activeReader()?.pageFlip?.(-1)
 }
 function nextPage() {
   if (isPdf.value) { pdfRef.value?.nextPage(); return }
-  // 滚动模式：翻一屏
-  if (continuousReaderRef.value?.pageFlip) {
-    continuousReaderRef.value.pageFlip(1)
-  }
+  // 双栏翻书：整页翻过；单栏滚动：向下翻一屏
+  activeReader()?.pageFlip?.(1)
 }
 // 搜索结果跳转：与 goToHref 同理，azw3/MOBI 的解析是异步的，需要 await
 async function jumpToCfi(cfi) {
@@ -1026,7 +1072,7 @@ async function jumpToCfi(cfi) {
   try {
     const resolved = await v.resolveNavigation(cfi)
     if (resolved && typeof resolved.index === 'number') {
-      continuousReaderRef.value?.scrollToSection?.(resolved.index)
+      activeReader()?.scrollToSection?.(resolved.index)
     }
   } catch (e) { console.warn('jumpToCfi failed', e) }
   searchOpen.value = false
@@ -1034,7 +1080,7 @@ async function jumpToCfi(cfi) {
 function onProgressClick(ev) {
   const rect = ev.currentTarget.getBoundingClientRect()
   const frac = (ev.clientX - rect.left) / rect.width
-  continuousReaderRef.value?.scrollToFraction?.(Math.min(1, Math.max(0, frac)))
+  activeReader()?.scrollToFraction?.(Math.min(1, Math.max(0, frac)))
 }
 
 // ============ 搜索（Phase 1 暂禁用：依赖 foliate CFI 搜索，连续滚动架构下未适配） ============
@@ -1099,7 +1145,7 @@ function onContinuousSelection(p) {
   if (!p || !p.text) return
   // 选区发生的此刻，该区块 iframe 必定已就绪——立即抓取全文快照，
   // 朗读时优先用它切句，规避"取句时区块被重载/未就绪→回退服务端错误章节"导致的高亮失效
-  const sectionText = continuousReaderRef.value?.getSectionText?.(p.blockIdx) || ''
+  const sectionText = activeReader()?.getSectionText?.(p.blockIdx) || ''
   selState.value = { text: p.text, blockIdx: p.blockIdx, range: p.range, sectionText }
   // 划线语音朗读待选模式：选中文字即从该处开始朗读
   if (ttsPendingSelection.value) {
@@ -1265,8 +1311,8 @@ const tts = reactive(useTtsPlayer({
       // PDF：高亮当前朗读页中被朗读句子覆盖的文本层 span（i 用于记录朗读断点）
       pdfRef.value?.ttsOnSentence?.(i, sentence)
     } else {
-      continuousReaderRef.value?.highlightSentence(ttsChapter.value, sentence)
-      continuousReaderRef.value?.scrollHighlightedIntoView?.()
+      activeReader()?.highlightSentence(ttsChapter.value, sentence)
+      activeReader()?.scrollHighlightedIntoView?.()
       // 逐句落朗读断点（进度按朗读章节计，见 doSave）
       scheduleSave(ttsChapter.value, 0)
     }
@@ -1350,10 +1396,10 @@ async function getChapterSentences(idx) {
     // 直接加载目标区块（绕过滚动窗口懒加载，isSectionLoaded 只看 block.loaded 会误判），
     // 确保该区块 iframe 进入 iframeRefs 且内容已解析；随后轮询其渲染文本，最长约 5s，
     // 句子必须取自渲染文本才能与高亮 DOM 匹配（此前回退服务端会因章节索引不对齐而错位）。
-    try { await continuousReaderRef.value?.loadSection?.(idx) } catch (e) { /* noop */ }
-    continuousReaderRef.value?.scrollToSection?.(idx, { behavior: 'auto' })
+    try { await activeReader()?.loadSection?.(idx) } catch (e) { /* noop */ }
+    activeReader()?.scrollToSection?.(idx, { behavior: 'auto' })
     for (let attempt = 0; attempt < 50; attempt++) {
-      iframeText = continuousReaderRef.value?.getSectionText?.(idx) || ''
+      iframeText = activeReader()?.getSectionText?.(idx) || ''
       if (iframeText && iframeText.trim()) break
       await new Promise(r => setTimeout(r, 100))
     }
@@ -1375,11 +1421,11 @@ async function getChapterSentences(idx) {
 
 // 等待章节 iframe 加载完成（切章后高亮需要文档就绪）
 async function waitTtsChapterLoaded(idx, timeout = 4000) {
-  if (continuousReaderRef.value?.isSectionLoaded?.(idx)) return true
+  if (activeReader()?.isSectionLoaded?.(idx)) return true
   const started = Date.now()
   while (Date.now() - started < timeout) {
     await new Promise(r => setTimeout(r, 150))
-    if (continuousReaderRef.value?.isSectionLoaded?.(idx)) return true
+    if (activeReader()?.isSectionLoaded?.(idx)) return true
   }
   return false
 }
@@ -1397,7 +1443,7 @@ function onTtsHeaderClick() {
 // 停止朗读并清理高亮
 function stopTtsReading() {
   tts.stop()
-  continuousReaderRef.value?.clearSentenceHighlight?.()
+  activeReader()?.clearSentenceHighlight?.()
   pdfRef.value?.ttsStop?.()
   ttsPendingSelection.value = false
 }
@@ -1416,7 +1462,7 @@ async function startTtsFromCurrent() {
   }
   const idx = Math.max(0, currentChapterIndex.value || 0)
   ttsChapter.value = idx
-  continuousReaderRef.value?.resetSentenceSearch?.()
+  activeReader()?.resetSentenceSearch?.()
   await waitTtsChapterLoaded(idx)
   const sents = await getChapterSentences(idx)
   if (!sents.length) {
@@ -1455,7 +1501,7 @@ async function startTtsFromSelection() {
   const selChapter = selState.value?.blockIdx
   const idx = typeof selChapter === 'number' ? selChapter : (currentChapterIndex.value || 0)
   ttsChapter.value = idx
-  continuousReaderRef.value?.resetSentenceSearch?.()
+  activeReader()?.resetSentenceSearch?.()
   await waitTtsChapterLoaded(idx)
   const sents = await getChapterSentences(idx)
   if (!sents.length) {
@@ -1516,8 +1562,8 @@ async function resumeTtsFromSaved() {
   const total = continuousSections.value.length
   const idx = Math.max(0, Math.min(loc.chapter || 0, Math.max(0, total - 1)))
   ttsChapter.value = idx
-  continuousReaderRef.value?.resetSentenceSearch?.()
-  continuousReaderRef.value?.scrollToSection?.(idx, { behavior: 'auto' })
+  activeReader()?.resetSentenceSearch?.()
+  activeReader()?.scrollToSection?.(idx, { behavior: 'auto' })
   await waitTtsChapterLoaded(idx)
   const sents = await getChapterSentences(idx)
   if (!sents.length) {
@@ -1534,12 +1580,12 @@ async function advanceTtsChapter() {
   const total = continuousSections.value.length
   let next = ttsChapter.value + 1
   while (next < total) {
-    continuousReaderRef.value?.scrollToSection?.(next, { behavior: 'auto' })
+    activeReader()?.scrollToSection?.(next, { behavior: 'auto' })
     await waitTtsChapterLoaded(next)
     const sents = await getChapterSentences(next)
     if (sents.length) {
       ttsChapter.value = next
-      continuousReaderRef.value?.resetSentenceSearch?.()
+      activeReader()?.resetSentenceSearch?.()
       tts.setSentences(sents)
       return
     }
@@ -1657,7 +1703,7 @@ function finishSelection() {
   noteText.value = ''
   activeAnnId.value = null
   // 清除连续滚动阅读器内的选区高亮（不影响已保存的标注 DOM）
-  continuousReaderRef.value?.clearSelection?.()
+  activeReader()?.clearSelection?.()
   if (isPdf.value) pdfRef.value?.pdfClearSelection?.()
 }
 
@@ -1666,7 +1712,7 @@ async function deleteAnnotation(ann) {
   annotations.value = annotations.value.filter(a => a.id !== ann.id)
   // 连续滚动模式：让 ScrollContinuousReader 清理对应 DOM 包裹
   if (isCrAnn(ann)) {
-    continuousReaderRef.value?.removeAnnotation?.(ann.id)
+    activeReader()?.removeAnnotation?.(ann.id)
   }
   // 非滚动模式（如 PDF）由各自处理；此处不再需要 foliate-view 旧路径
 }
@@ -1676,7 +1722,7 @@ async function jumpToAnnotation(ann) {
   showAnnDrawer.value = false
   // 连续滚动模式
   if (isCrAnn(ann)) {
-    continuousReaderRef.value?.scrollToAnnotation?.(ann)
+    activeReader()?.scrollToAnnotation?.(ann)
     return
   }
   // PDF 等其他格式的批注跳转交给对应阅读器（PdfReader 自身处理）
@@ -1730,7 +1776,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onPageHide)
   flushSave() // 先落库进度与朗读断点（请求同步发出）
   tts.stop() // 再停止音频与 WebSocket，避免进行中的合成写入过期断点
-  continuousReaderRef.value?.clearSentenceHighlight?.()
+  activeReader()?.clearSentenceHighlight?.()
   // 上报本次阅读会话（不 await：进度已本地落盘，统计上报异步进行，返回不卡顿）
   reportReadingSession()
 })
@@ -2309,6 +2355,12 @@ onBeforeUnmount(() => {
   padding: 12px 0;
   border-bottom: 1px solid #f1f5f9;
   font-size: 14px;
+}
+.fr-setting-tip {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
 }
 .fr-stepper { display: flex; align-items: center; gap: 10px; }
 .fr-value { min-width: 42px; text-align: center; }

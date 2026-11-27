@@ -334,6 +334,20 @@ watch(() => props.selectMode, () => {
   }
 })
 
+// 字号/主题等注入样式变化时，已加载章节也要立即重新测量高度。
+// EPUB 布局可能在样式切换后分两帧完成，因此延后补测一次。
+function reapplyFontCss() {
+  const loaded = blocks.value.filter(b => b.loaded)
+  for (const block of loaded) {
+    injectStyles(block)
+    measureHeight(block)
+  }
+  setTimeout(() => {
+    for (const block of loaded) measureHeight(block)
+  }, 120)
+}
+watch(() => props.fontCss, () => nextTick(reapplyFontCss))
+
 // 划线模式的笔形光标：记录当前值，新加载章节同样应用
 let drawCursor = ''
 function setIframeCursor(block, cursor) {
